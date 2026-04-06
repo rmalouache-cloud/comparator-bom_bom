@@ -18,12 +18,24 @@ if old_file and new_file:
     old_bom = pd.read_excel(old_file)
     new_bom = pd.read_excel(new_file)
 
+    # Clean column names
+    old_bom.columns = old_bom.columns.str.strip()
+    new_bom.columns = new_bom.columns.str.strip()
+
+    # Required columns
     cols = ["PN", "Description", "bom_qty", "BOM text"]
 
+    # Check columns existence
+    for col in cols:
+        if col not in old_bom.columns or col not in new_bom.columns:
+            st.error(f"❌ Missing column: {col}")
+            st.stop()
+
+    # Select columns
     old_bom = old_bom[cols].copy()
     new_bom = new_bom[cols].copy()
 
-    # Rename Position
+    # Rename position column
     old_bom.rename(columns={"BOM text": "Position"}, inplace=True)
     new_bom.rename(columns={"BOM text": "Position"}, inplace=True)
 
@@ -32,37 +44,44 @@ if old_file and new_file:
         df["PN"] = df["PN"].astype(str).str.strip().str.upper()
         df["Position"] = df["Position"].astype(str).str.strip().str.upper()
 
-    # Key
+    # Create key
     old_bom["key"] = old_bom["PN"] + "_" + old_bom["Position"]
     new_bom["key"] = new_bom["PN"] + "_" + new_bom["Position"]
 
-    # Merge
-    df.rename(columns={
-       "PN_old": "PN_old",
-       "Description_old": "Description_old",
-       "bom_qty_old": "bom_qty_old",
-       "PN_new": "PN_new",
-       "Description_new": "Description_new",
-       "bom_qty_new": "bom_qty_new",
-   }, inplace=True)
+    # Merge (IMPORTANT: indicator=True)
+    df = old_bom.merge(
+        new_bom,
+        on="key",
+        how="outer",
+        suffixes=("_old", "_new"),
+        indicator=True
+    )
 
-    # Status logic
+    # Replace NaN to avoid errors
+    df.fillna("", inplace=True)
+
+    # Status logic (safe)
     def get_status(row):
+
         if row["_merge"] == "both":
             if row["bom_qty_old"] == row["bom_qty_new"]:
                 return "Conforme"
             else:
                 return "Qty Difference"
+
         elif row["_merge"] == "left_only":
             if row["PN_old"] in new_bom["PN"].values:
                 return "Position Difference"
             else:
                 return "Missing in BOM 2"
+
         elif row["_merge"] == "right_only":
             if row["PN_new"] in old_bom["PN"].values:
                 return "Position Difference"
             else:
                 return "Missing in BOM 1"
+
+        return "Unknown"
 
     df["Status"] = df.apply(get_status, axis=1)
 
@@ -76,12 +95,14 @@ if old_file and new_file:
     st.subheader("📋 Comparison Result")
     st.dataframe(result, use_container_width=True)
 
-    # Save to Excel in memory
+    # =========================
+    # EXPORT EXCEL WITH COLORS
+    # =========================
+
     output = io.BytesIO()
     result.to_excel(output, index=False)
     output.seek(0)
 
-    # Apply colors
     wb = load_workbook(output)
     ws = wb.active
 
@@ -116,7 +137,7 @@ if old_file and new_file:
         for col in range(1, ws.max_column + 1):
             ws.cell(row=row, column=col).fill = fill
 
-    # Save final Excel
+    # Save final file
     final_file = io.BytesIO()
     wb.save(final_file)
     final_file.seek(0)
