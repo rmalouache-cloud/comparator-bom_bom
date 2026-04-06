@@ -37,13 +37,14 @@ if old_file and new_file:
     new_bom["key"] = new_bom["PN"] + "_" + new_bom["Position"]
 
     # Merge
-    df = old_bom.merge(
-        new_bom,
-        on="key",
-        how="outer",
-        suffixes=("_old", "_new"),
-        indicator=True
-    )
+    df.rename(columns={
+       "PN_old": "PN_old",
+       "Description_old": "Description_old",
+       "bom_qty_old": "bom_qty_old",
+       "PN_new": "PN_new",
+       "Description_new": "Description_new",
+       "bom_qty_new": "bom_qty_new",
+   }, inplace=True)
 
     # Status logic
     def get_status(row):
