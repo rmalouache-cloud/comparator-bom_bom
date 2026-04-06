@@ -12,20 +12,26 @@ st.title("📊 BOM Comparison Tool")
 old_file = st.file_uploader("📂 Upload OLD BOM", type=["xlsx"])
 new_file = st.file_uploader("📂 Upload NEW BOM", type=["xlsx"])
 
-if old_file and new_file:
+# Bouton pour lancer la comparaison
+start = st.button("🚀 Start Comparison")
+
+if start:
+
+    if old_file is None or new_file is None:
+        st.error("❌ Please upload both BOM files")
+        st.stop()
 
     # Read files
     old_bom = pd.read_excel(old_file)
     new_bom = pd.read_excel(new_file)
 
-    # Clean column names
+    # Clean columns
     old_bom.columns = old_bom.columns.str.strip()
     new_bom.columns = new_bom.columns.str.strip()
 
     # Required columns
     cols = ["PN", "Description", "bom_qty", "BOM text"]
 
-    # Check columns existence
     for col in cols:
         if col not in old_bom.columns or col not in new_bom.columns:
             st.error(f"❌ Missing column: {col}")
@@ -35,7 +41,7 @@ if old_file and new_file:
     old_bom = old_bom[cols].copy()
     new_bom = new_bom[cols].copy()
 
-    # Rename position column
+    # Rename position
     old_bom.rename(columns={"BOM text": "Position"}, inplace=True)
     new_bom.rename(columns={"BOM text": "Position"}, inplace=True)
 
@@ -44,11 +50,11 @@ if old_file and new_file:
         df["PN"] = df["PN"].astype(str).str.strip().str.upper()
         df["Position"] = df["Position"].astype(str).str.strip().str.upper()
 
-    # Create key
+    # Key
     old_bom["key"] = old_bom["PN"] + "_" + old_bom["Position"]
     new_bom["key"] = new_bom["PN"] + "_" + new_bom["Position"]
 
-    # Merge (IMPORTANT: indicator=True)
+    # Merge (IMPORTANT)
     df = old_bom.merge(
         new_bom,
         on="key",
@@ -57,10 +63,9 @@ if old_file and new_file:
         indicator=True
     )
 
-    # Replace NaN to avoid errors
     df.fillna("", inplace=True)
 
-    # Status logic (safe)
+    # Status logic
     def get_status(row):
 
         if row["_merge"] == "both":
@@ -85,7 +90,7 @@ if old_file and new_file:
 
     df["Status"] = df.apply(get_status, axis=1)
 
-    # Final table
+    # Final result
     result = df[[
         "PN_old", "Description_old", "bom_qty_old", "Position",
         "PN_new", "Description_new", "bom_qty_new", "Position",
