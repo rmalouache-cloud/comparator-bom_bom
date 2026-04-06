@@ -8,11 +8,15 @@ st.set_page_config(page_title="BOM Comparator", layout="wide")
 
 st.title("📊 BOM Comparison Tool")
 
-# Upload files
+# ======================
+# UPLOAD FILES
+# ======================
 old_file = st.file_uploader("📂 Upload OLD BOM", type=["xlsx"])
 new_file = st.file_uploader("📂 Upload NEW BOM", type=["xlsx"])
 
-# Button
+# ======================
+# BUTTON
+# ======================
 start = st.button("🚀 Start Comparison")
 
 if start:
@@ -21,44 +25,51 @@ if start:
         st.error("❌ Please upload both BOM files")
         st.stop()
 
-    # Read files
+    # ======================
+    # READ FILES
+    # ======================
     old_bom = pd.read_excel(old_file)
     new_bom = pd.read_excel(new_file)
 
-    # Clean column names
+    # Clean columns
     old_bom.columns = old_bom.columns.str.strip()
     new_bom.columns = new_bom.columns.str.strip()
 
-    # Required columns
     required_cols = ["PN", "Description", "bom_qty", "BOM text"]
 
+    # Check columns
     for col in required_cols:
         if col not in old_bom.columns or col not in new_bom.columns:
             st.error(f"❌ Missing column: {col}")
             st.stop()
 
-    # Keep only useful columns
+    # Keep only needed columns
     old_bom = old_bom[required_cols].copy()
     new_bom = new_bom[required_cols].copy()
 
-    # Rename position column
+    # Rename Position
     old_bom.rename(columns={"BOM text": "Position"}, inplace=True)
     new_bom.rename(columns={"BOM text": "Position"}, inplace=True)
 
-    # Normalize text
+    # ======================
+    # CLEAN DATA
+    # ======================
     for df in [old_bom, new_bom]:
         df["PN"] = df["PN"].astype(str).str.strip().str.upper()
         df["Position"] = df["Position"].astype(str).str.strip().str.upper()
 
-    # Convert qty to numeric
     old_bom["bom_qty"] = pd.to_numeric(old_bom["bom_qty"], errors="coerce")
     new_bom["bom_qty"] = pd.to_numeric(new_bom["bom_qty"], errors="coerce")
 
-    # Create key
+    # ======================
+    # CREATE KEY
+    # ======================
     old_bom["key"] = old_bom["PN"] + "_" + old_bom["Position"]
     new_bom["key"] = new_bom["PN"] + "_" + new_bom["Position"]
 
-    # Merge
+    # ======================
+    # MERGE
+    # ======================
     df = old_bom.merge(
         new_bom,
         on="key",
@@ -67,11 +78,15 @@ if start:
         indicator=True
     )
 
-    # Fill only text columns (FIX ERROR)
+    # ======================
+    # FILL ONLY TEXT COLUMNS (FIX ERROR)
+    # ======================
     text_cols = df.select_dtypes(include=["object"]).columns
     df[text_cols] = df[text_cols].fillna("")
 
-    # Status logic
+    # ======================
+    # STATUS FUNCTION
+    # ======================
     def get_status(row):
 
         if row["_merge"] == "both":
@@ -81,35 +96,40 @@ if start:
                 return "Qty Difference"
 
         elif row["_merge"] == "left_only":
-            if row["PN_old"] in new_bom["PN"].values:
-                return "Position Difference"
-            else:
-                return "Missing in BOM 2"
+            return "Missing in BOM 2"
 
         elif row["_merge"] == "right_only":
-            if row["PN_new"] in old_bom["PN"].values:
-                return "Position Difference"
-            else:
-                return "Missing in BOM 1"
+            return "Missing in BOM 1"
 
         return "Unknown"
 
     df["Status"] = df.apply(get_status, axis=1)
 
-    # Final table
+    # ======================
+    # FINAL RESULT TABLE
+    # ======================
     result = df[[
-        "PN_old", "Description_old", "bom_qty_old", "Position",
-        "PN_new", "Description_new", "bom_qty_new", "Position",
+        "PN_old", "Description_old", "bom_qty_old",
+        "PN_new", "Description_new", "bom_qty_new",
         "Status"
     ]]
+
+    # Rename for display
+    result.rename(columns={
+        "PN_old": "PN (OLD)",
+        "Description_old": "Description (OLD)",
+        "bom_qty_old": "Qty (OLD)",
+        "PN_new": "PN (NEW)",
+        "Description_new": "Description (NEW)",
+        "bom_qty_new": "Qty (NEW)"
+    }, inplace=True)
 
     st.subheader("📋 Comparison Result")
     st.dataframe(result, use_container_width=True)
 
-    # =========================
-    # EXPORT EXCEL WITH COLORS
-    # =========================
-
+    # ======================
+    # EXPORT EXCEL
+    # ======================
     output = io.BytesIO()
     result.to_excel(output, index=False)
     output.seek(0)
@@ -117,7 +137,9 @@ if start:
     wb = load_workbook(output)
     ws = wb.active
 
-    # Colors
+    # ======================
+    # COLORS
+    # ======================
     green = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
     red = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
     orange = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
@@ -140,20 +162,19 @@ if start:
             fill = red
         elif status == "Qty Difference":
             fill = orange
-        elif status == "Position Difference":
-            fill = blue
         else:
-            continue
+            fill = blue
 
         for col in range(1, ws.max_column + 1):
             ws.cell(row=row, column=col).fill = fill
 
-    # Save final Excel
+    # ======================
+    # DOWNLOAD
+    # ======================
     final_file = io.BytesIO()
     wb.save(final_file)
     final_file.seek(0)
 
-    # Download button
     st.download_button(
         label="📥 Download Excel Result",
         data=final_file,
