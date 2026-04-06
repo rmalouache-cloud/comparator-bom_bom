@@ -12,7 +12,7 @@ st.title("📊 BOM Comparison Tool")
 old_file = st.file_uploader("📂 Upload OLD BOM", type=["xlsx"])
 new_file = st.file_uploader("📂 Upload NEW BOM", type=["xlsx"])
 
-# Bouton pour lancer la comparaison
+# Button
 start = st.button("🚀 Start Comparison")
 
 if start:
@@ -25,36 +25,40 @@ if start:
     old_bom = pd.read_excel(old_file)
     new_bom = pd.read_excel(new_file)
 
-    # Clean columns
+    # Clean column names
     old_bom.columns = old_bom.columns.str.strip()
     new_bom.columns = new_bom.columns.str.strip()
 
     # Required columns
-    cols = ["PN", "Description", "bom_qty", "BOM text"]
+    required_cols = ["PN", "Description", "bom_qty", "BOM text"]
 
-    for col in cols:
+    for col in required_cols:
         if col not in old_bom.columns or col not in new_bom.columns:
             st.error(f"❌ Missing column: {col}")
             st.stop()
 
-    # Select columns
-    old_bom = old_bom[cols].copy()
-    new_bom = new_bom[cols].copy()
+    # Keep only useful columns
+    old_bom = old_bom[required_cols].copy()
+    new_bom = new_bom[required_cols].copy()
 
-    # Rename position
+    # Rename position column
     old_bom.rename(columns={"BOM text": "Position"}, inplace=True)
     new_bom.rename(columns={"BOM text": "Position"}, inplace=True)
 
-    # Normalize
+    # Normalize text
     for df in [old_bom, new_bom]:
         df["PN"] = df["PN"].astype(str).str.strip().str.upper()
         df["Position"] = df["Position"].astype(str).str.strip().str.upper()
 
-    # Key
+    # Convert qty to numeric
+    old_bom["bom_qty"] = pd.to_numeric(old_bom["bom_qty"], errors="coerce")
+    new_bom["bom_qty"] = pd.to_numeric(new_bom["bom_qty"], errors="coerce")
+
+    # Create key
     old_bom["key"] = old_bom["PN"] + "_" + old_bom["Position"]
     new_bom["key"] = new_bom["PN"] + "_" + new_bom["Position"]
 
-    # Merge (IMPORTANT)
+    # Merge
     df = old_bom.merge(
         new_bom,
         on="key",
@@ -63,7 +67,9 @@ if start:
         indicator=True
     )
 
-    df.fillna("", inplace=True)
+    # Fill only text columns (FIX ERROR)
+    text_cols = df.select_dtypes(include=["object"]).columns
+    df[text_cols] = df[text_cols].fillna("")
 
     # Status logic
     def get_status(row):
@@ -90,7 +96,7 @@ if start:
 
     df["Status"] = df.apply(get_status, axis=1)
 
-    # Final result
+    # Final table
     result = df[[
         "PN_old", "Description_old", "bom_qty_old", "Position",
         "PN_new", "Description_new", "bom_qty_new", "Position",
@@ -142,7 +148,7 @@ if start:
         for col in range(1, ws.max_column + 1):
             ws.cell(row=row, column=col).fill = fill
 
-    # Save final file
+    # Save final Excel
     final_file = io.BytesIO()
     wb.save(final_file)
     final_file.seek(0)
