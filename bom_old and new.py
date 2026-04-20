@@ -4,7 +4,7 @@ import io
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 
-st.title("BOM Comparator SMT")
+st.title("BOM Comparator - SMT Level")
 
 old_file = st.file_uploader("Upload OLD BOM", type=["xlsx"])
 new_file = st.file_uploader("Upload NEW BOM", type=["xlsx"])
@@ -14,72 +14,47 @@ if st.button("Start Comparison"):
     old = pd.read_excel(old_file)
     new = pd.read_excel(new_file)
 
-    # Clean
+    # Clean columns
     old.columns = old.columns.str.strip()
     new.columns = new.columns.str.strip()
 
     cols = ["PN", "Description", "bom_qty", "BOM text"]
+
     old = old[cols].copy()
     new = new[cols].copy()
 
     old.rename(columns={"BOM text": "Position"}, inplace=True)
     new.rename(columns={"BOM text": "Position"}, inplace=True)
 
+    # Normalize
     for df in [old, new]:
         df["PN"] = df["PN"].astype(str).str.strip().str.upper()
-        df["Description"] = df["Description"].astype(str).str.strip().str.upper()
+        df["Description"] = df["Description"].astype(str).str.strip()
         df["Position"] = df["Position"].astype(str).str.strip().str.upper()
+        df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce")
 
-    # ======================
-    # GROUP BY PN 🔥
-    # ======================
-    old_group = old.groupby("PN").agg({
-        "Description": "first",
-        "Position": lambda x: list(x)
-    }).reset_index()
-
-    new_group = new.groupby("PN").agg({
-        "Description": "first",
-        "Position": lambda x: list(x)
-    }).reset_index()
-
-    # Convert to set
-    old_group["Position"] = old_group["Position"].apply(set)
-    new_group["Position"] = new_group["Position"].apply(set)
-
-    # Qty = nombre de positions
-    old_group["Qty"] = old_group["Position"].apply(len)
-    new_group["Qty"] = new_group["Position"].apply(len)
-
-    # ======================
-    # MERGE PN
-    # ======================
-    df = old_group.merge(
-        new_group,
-        on="PN",
+    # =========================
+    # MERGE PN + POSITION 🔥
+    # =========================
+    df = old.merge(
+        new,
+        on=["PN", "Position"],
         how="outer",
         suffixes=("_old", "_new"),
         indicator=True
     )
 
-    # ======================
+    # =========================
     # STATUS LOGIC
-    # ======================
+    # =========================
     def get_status(row):
 
         if row["_merge"] == "both":
 
-            if row["Description_old"] != row["Description_new"]:
-                return "Check Description"
-
-            if row["Position_old"] == row["Position_new"]:
+            if row["bom_qty_old"] == row["bom_qty_new"]:
                 return "Conform"
-
-            elif row["Qty_old"] != row["Qty_new"]:
-                return "Qty Difference"
-
             else:
-                return "Position Difference"
+                return "Qty Difference"
 
         elif row["_merge"] == "left_only":
             return "Missing in BOM2"
@@ -87,19 +62,44 @@ if st.button("Start Comparison"):
         elif row["_merge"] == "right_only":
             return "Missing in BOM1"
 
-    df["Status"] = df.apply(get_status, axis=1)
+    df["Remarks"] = df.apply(get_status, axis=1)
 
-    # Convert set to string for display
-    df["Position_old"] = df["Position_old"].astype(str)
-    df["Position_new"] = df["Position_new"].astype(str)
+    # =========================
+    # HANDLE POSITION DIFFERENCE 🔥
+    # =========================
+    # détecter même PN mais position différente
+    for i, row in df.iterrows():
 
-    st.dataframe(df)
+        if row["Remarks"] in ["Missing in BOM1", "Missing in BOM2"]:
 
-    # ======================
+            # chercher même PN dans autre BOM
+            if row["PN"] in old["PN"].values and row["PN"] in new["PN"].values:
+                df.at[i, "Remarks"] = "Position Difference"
+
+    # =========================
+    # FINAL FORMAT
+    # =========================
+    result = df[[
+        "PN", "Description_old", "bom_qty_old", "Position",
+        "Description_new", "bom_qty_new", "Position",
+        "Remarks"
+    ]]
+
+    result.rename(columns={
+        "PN": "PN",
+        "Description_old": "Desc OLD",
+        "bom_qty_old": "Qty OLD",
+        "Description_new": "Desc NEW",
+        "bom_qty_new": "Qty NEW"
+    }, inplace=True)
+
+    st.dataframe(result, use_container_width=True)
+
+    # =========================
     # EXPORT EXCEL
-    # ======================
+    # =========================
     output = io.BytesIO()
-    df.to_excel(output, index=False)
+    result.to_excel(output, index=False)
     output.seek(0)
 
     wb = load_workbook(output)
@@ -111,7 +111,7 @@ if st.button("Start Comparison"):
     blue = PatternFill(start_color="BDD7EE", fill_type="solid")
 
     for col in range(1, ws.max_column + 1):
-        if ws.cell(1, col).value == "Status":
+        if ws.cell(1, col).value == "Remarks":
             status_col = col
             break
 
@@ -124,8 +124,10 @@ if st.button("Start Comparison"):
             fill = red
         elif status == "Qty Difference":
             fill = orange
-        else:
+        elif status == "Position Difference":
             fill = blue
+        else:
+            continue
 
         for col in range(1, ws.max_column + 1):
             ws.cell(row, col).fill = fill
@@ -134,4 +136,4 @@ if st.button("Start Comparison"):
     wb.save(final)
     final.seek(0)
 
-    st.download_button("Download Excel", final, "result.xlsx")
+    st.download_button("Download Excel", final, "BOM_result.xlsx")
