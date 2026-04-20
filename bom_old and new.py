@@ -29,6 +29,14 @@ if start:
 
     cols = ["PN", "Description", "bom_qty", "BOM text"]
 
+    # Vérification colonnes
+    for col in cols:
+        if col not in old.columns or col not in new.columns:
+            st.error(f"❌ Missing column: {col}")
+            st.write("OLD columns:", old.columns)
+            st.write("NEW columns:", new.columns)
+            st.stop()
+
     old = old[cols].copy()
     new = new[cols].copy()
 
@@ -42,22 +50,36 @@ if start:
         df["PN"] = df["PN"].astype(str).str.strip().str.upper()
         df["Description"] = df["Description"].astype(str).str.strip().str.upper()
         df["Position"] = df["Position"].astype(str).str.strip().str.upper()
+        df["bom_qty"] = (
+            df["bom_qty"]
+            .astype(str)
+            .str.replace(",", ".", regex=False)
+        )
         df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce")
 
     # ======================
-    # MERGE ON PN ONLY 🔥
+    # REMOVE DUPLICATES (VERY IMPORTANT 🔥)
+    # ======================
+    old = old.groupby(["PN", "Position", "Description"], as_index=False)["bom_qty"].sum()
+    new = new.groupby(["PN", "Position", "Description"], as_index=False)["bom_qty"].sum()
+
+    # ======================
+    # MERGE ON PN + POSITION ✅
     # ======================
     df = old.merge(
         new,
-        on="PN",
+        on=["PN", "Position"],
         how="outer",
         suffixes=("_old", "_new"),
         indicator=True
     )
 
-    # Fill text only
+    # Fill text
     text_cols = df.select_dtypes(include=["object"]).columns
     df[text_cols] = df[text_cols].fillna("")
+
+    df["bom_qty_old"] = df["bom_qty_old"].fillna(0)
+    df["bom_qty_new"] = df["bom_qty_new"].fillna(0)
 
     # ======================
     # STATUS LOGIC 🔥
@@ -68,32 +90,24 @@ if start:
 
             if (
                 row["Description_old"] == row["Description_new"] and
-                row["bom_qty_old"] == row["bom_qty_new"] and
-                row["Position_old"] == row["Position_new"]
+                row["bom_qty_old"] == row["bom_qty_new"]
             ):
                 return "Conform"
 
-            elif (
-                row["Description_old"] == row["Description_new"] and
-                row["bom_qty_old"] != row["bom_qty_new"]
-            ):
+            elif row["bom_qty_old"] != row["bom_qty_new"]:
                 return "Qty Difference"
 
-            elif (
-                row["Description_old"] == row["Description_new"] and
-                row["bom_qty_old"] == row["bom_qty_new"] and
-                row["Position_old"] != row["Position_new"]
-            ):
+            elif row["Description_old"] == row["Description_new"]:
                 return "Position Difference"
 
             else:
                 return "Check Manually"
 
-        elif row["_merge"] == "right_only":
-            return "Missing in BOM1"
-
         elif row["_merge"] == "left_only":
             return "Missing in BOM2"
+
+        elif row["_merge"] == "right_only":
+            return "Missing in BOM1"
 
         return "Unknown"
 
@@ -104,18 +118,17 @@ if start:
     # ======================
     result = df[[
         "PN",
-        "Description_old", "bom_qty_old", "Position_old",
-        "Description_new", "bom_qty_new", "Position_new",
+        "Description_old", "bom_qty_old", "Position",
+        "Description_new", "bom_qty_new",
         "Status"
     ]]
 
     result.rename(columns={
         "Description_old": "Desc OLD",
         "bom_qty_old": "Qty OLD",
-        "Position_old": "Pos OLD",
+        "Position": "Pos",
         "Description_new": "Desc NEW",
-        "bom_qty_new": "Qty NEW",
-        "Position_new": "Pos NEW"
+        "bom_qty_new": "Qty NEW"
     }, inplace=True)
 
     st.dataframe(result, use_container_width=True)
@@ -136,11 +149,15 @@ if start:
     orange = PatternFill(start_color="FFEB9C", fill_type="solid")
     blue = PatternFill(start_color="BDD7EE", fill_type="solid")
 
-    # Find Status column
+    # Find Status column safely
+    status_col = None
     for col in range(1, ws.max_column + 1):
         if ws.cell(row=1, column=col).value == "Status":
             status_col = col
-            break
+
+    if status_col is None:
+        st.error("❌ Status column not found")
+        st.stop()
 
     # Apply colors
     for row in range(2, ws.max_row + 1):
