@@ -45,17 +45,17 @@ if start:
     # ======================
     # CLEAN
     # ======================
-    for df in [old, new]:
-        df["PN"] = df["PN"].astype(str).str.strip().str.upper()
-        df["Description"] = df["Description"].astype(str).str.strip().str.upper()
-        df["Position"] = df["Position"].astype(str).str.strip().str.upper()
+    for df_ in [old, new]:
+        df_["PN"] = df_["PN"].astype(str).str.strip().str.upper()
+        df_["Description"] = df_["Description"].astype(str).str.strip().str.upper()
+        df_["Position"] = df_["Position"].astype(str).str.strip().str.upper()
 
-        df["bom_qty"] = (
-            df["bom_qty"]
+        df_["bom_qty"] = (
+            df_["bom_qty"]
             .astype(str)
             .str.replace(",", ".", regex=False)
         )
-        df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce")
+        df_["bom_qty"] = pd.to_numeric(df_["bom_qty"], errors="coerce")
 
     # ======================
     # REMOVE DUPLICATES
@@ -78,6 +78,13 @@ if start:
 
     df["bom_qty_old"] = pd.to_numeric(df["bom_qty_old"], errors="coerce").fillna(0)
     df["bom_qty_new"] = pd.to_numeric(df["bom_qty_new"], errors="coerce").fillna(0)
+
+    # ======================
+    # FIX PN NEW 🔥
+    # ======================
+    df["PN_new"] = df["PN"]
+    df.loc[df["_merge"] == "left_only", "PN_new"] = ""
+    df.loc[df["_merge"] == "right_only", "PN_new"] = df["PN"]
 
     # ======================
     # INITIAL STATUS
