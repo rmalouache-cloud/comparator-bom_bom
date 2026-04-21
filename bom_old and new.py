@@ -29,12 +29,11 @@ if start:
 
     cols = ["PN", "Description", "bom_qty", "BOM text"]
 
-    # Vérification colonnes
     for col in cols:
         if col not in old.columns or col not in new.columns:
             st.error(f"❌ Missing column: {col}")
-            st.write("OLD columns:", old.columns)
-            st.write("NEW columns:", new.columns)
+            st.write("OLD:", old.columns)
+            st.write("NEW:", new.columns)
             st.stop()
 
     old = old[cols].copy()
@@ -50,6 +49,7 @@ if start:
         df["PN"] = df["PN"].astype(str).str.strip().str.upper()
         df["Description"] = df["Description"].astype(str).str.strip().str.upper()
         df["Position"] = df["Position"].astype(str).str.strip().str.upper()
+
         df["bom_qty"] = (
             df["bom_qty"]
             .astype(str)
@@ -58,13 +58,13 @@ if start:
         df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce")
 
     # ======================
-    # REMOVE DUPLICATES (VERY IMPORTANT 🔥)
+    # REMOVE DUPLICATES
     # ======================
     old = old.groupby(["PN", "Position", "Description"], as_index=False)["bom_qty"].sum()
     new = new.groupby(["PN", "Position", "Description"], as_index=False)["bom_qty"].sum()
 
     # ======================
-    # MERGE ON PN + POSITION ✅
+    # MERGE PRIMARY (PN + POSITION)
     # ======================
     df = old.merge(
         new,
@@ -74,15 +74,14 @@ if start:
         indicator=True
     )
 
-    # Fill text
+    # Fill
     text_cols = df.select_dtypes(include=["object"]).columns
     df[text_cols] = df[text_cols].fillna("")
-
     df["bom_qty_old"] = df["bom_qty_old"].fillna(0)
     df["bom_qty_new"] = df["bom_qty_new"].fillna(0)
 
     # ======================
-    # STATUS LOGIC 🔥
+    # INITIAL STATUS
     # ======================
     def get_status(row):
 
@@ -97,9 +96,6 @@ if start:
             elif row["bom_qty_old"] != row["bom_qty_new"]:
                 return "Qty Difference"
 
-            elif row["Description_old"] == row["Description_new"]:
-                return "Position Difference"
-
             else:
                 return "Check Manually"
 
@@ -112,6 +108,31 @@ if start:
         return "Unknown"
 
     df["Status"] = df.apply(get_status, axis=1)
+
+    # ======================
+    # DETECT POSITION DIFFERENCE 🔥
+    # ======================
+    old["key_pd"] = old["PN"] + "|" + old["Description"]
+    new["key_pd"] = new["PN"] + "|" + new["Description"]
+
+    common_pd = set(old["key_pd"]).intersection(set(new["key_pd"]))
+
+    def fix_position(row):
+
+        if row["Status"] in ["Missing in BOM1", "Missing in BOM2"]:
+
+            desc_old = row.get("Description_old", "")
+            desc_new = row.get("Description_new", "")
+
+            key_old = str(row["PN"]) + "|" + str(desc_old)
+            key_new = str(row["PN"]) + "|" + str(desc_new)
+
+            if key_old in common_pd or key_new in common_pd:
+                return "Position Difference"
+
+        return row["Status"]
+
+    df["Status"] = df.apply(fix_position, axis=1)
 
     # ======================
     # FINAL TABLE
@@ -143,13 +164,11 @@ if start:
     wb = load_workbook(output)
     ws = wb.active
 
-    # COLORS
     green = PatternFill(start_color="C6EFCE", fill_type="solid")
     red = PatternFill(start_color="FFC7CE", fill_type="solid")
     orange = PatternFill(start_color="FFEB9C", fill_type="solid")
     blue = PatternFill(start_color="BDD7EE", fill_type="solid")
 
-    # Find Status column safely
     status_col = None
     for col in range(1, ws.max_column + 1):
         if ws.cell(row=1, column=col).value == "Status":
@@ -159,7 +178,6 @@ if start:
         st.error("❌ Status column not found")
         st.stop()
 
-    # Apply colors
     for row in range(2, ws.max_row + 1):
         status = ws.cell(row=row, column=status_col).value
 
