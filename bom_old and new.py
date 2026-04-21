@@ -64,7 +64,7 @@ if start:
     new = new.groupby(["PN", "Position", "Description"], as_index=False)["bom_qty"].sum()
 
     # ======================
-    # MERGE PRIMARY (PN + POSITION)
+    # MERGE PN + POSITION
     # ======================
     df = old.merge(
         new,
@@ -74,11 +74,10 @@ if start:
         indicator=True
     )
 
-    # Fill
-    text_cols = df.select_dtypes(include=["object"]).columns
-    df[text_cols] = df[text_cols].fillna("")
-    df["bom_qty_old"] = df["bom_qty_old"].fillna(0)
-    df["bom_qty_new"] = df["bom_qty_new"].fillna(0)
+    df = df.fillna("")
+
+    df["bom_qty_old"] = pd.to_numeric(df["bom_qty_old"], errors="coerce").fillna(0)
+    df["bom_qty_new"] = pd.to_numeric(df["bom_qty_new"], errors="coerce").fillna(0)
 
     # ======================
     # INITIAL STATUS
@@ -110,29 +109,49 @@ if start:
     df["Status"] = df.apply(get_status, axis=1)
 
     # ======================
-    # DETECT POSITION DIFFERENCE 🔥
+    # MERGE POSITION DIFFERENCE INTO ONE ROW 🔥
     # ======================
-    old["key_pd"] = old["PN"] + "|" + old["Description"]
-    new["key_pd"] = new["PN"] + "|" + new["Description"]
+    missing_old = df[df["Status"] == "Missing in BOM2"].copy()
+    missing_new = df[df["Status"] == "Missing in BOM1"].copy()
 
-    common_pd = set(old["key_pd"]).intersection(set(new["key_pd"]))
+    missing_old["key"] = missing_old["PN"] + "|" + missing_old["Description_old"]
+    missing_new["key"] = missing_new["PN"] + "|" + missing_new["Description_new"]
 
-    def fix_position(row):
+    merged_rows = []
+    used_keys = set()
 
-        if row["Status"] in ["Missing in BOM1", "Missing in BOM2"]:
+    for _, row_old in missing_old.iterrows():
+        key = row_old["key"]
 
-            desc_old = row.get("Description_old", "")
-            desc_new = row.get("Description_new", "")
+        match = missing_new[missing_new["key"] == key]
 
-            key_old = str(row["PN"]) + "|" + str(desc_old)
-            key_new = str(row["PN"]) + "|" + str(desc_new)
+        if not match.empty:
+            row_new = match.iloc[0]
 
-            if key_old in common_pd or key_new in common_pd:
-                return "Position Difference"
+            merged_rows.append({
+                "PN": row_old["PN"],
+                "Description_old": row_old["Description_old"],
+                "bom_qty_old": row_old["bom_qty_old"],
+                "Position": row_old["Position"],
 
-        return row["Status"]
+                "PN_new": row_new["PN"],
+                "Description_new": row_new["Description_new"],
+                "bom_qty_new": row_new["bom_qty_new"],
 
-    df["Status"] = df.apply(fix_position, axis=1)
+                "Status": "Position Difference"
+            })
+
+            used_keys.add(key)
+
+    # supprimer anciennes lignes
+    df = df[~(
+        (df["Status"].isin(["Missing in BOM1", "Missing in BOM2"])) &
+        ((df["PN"] + "|" + df["Description_old"]).isin(used_keys) |
+         (df["PN"] + "|" + df["Description_new"]).isin(used_keys))
+    )]
+
+    # ajouter fusion
+    df = pd.concat([df, pd.DataFrame(merged_rows)], ignore_index=True)
 
     # ======================
     # FINAL TABLE
@@ -140,6 +159,7 @@ if start:
     result = df[[
         "PN",
         "Description_old", "bom_qty_old", "Position",
+        "PN_new",
         "Description_new", "bom_qty_new",
         "Status"
     ]]
@@ -148,6 +168,7 @@ if start:
         "Description_old": "Desc OLD",
         "bom_qty_old": "Qty OLD",
         "Position": "Pos",
+        "PN_new": "PN NEW",
         "Description_new": "Desc NEW",
         "bom_qty_new": "Qty NEW"
     }, inplace=True)
