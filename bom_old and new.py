@@ -59,23 +59,22 @@ if start:
             errors="coerce"
         ).fillna(0)
 
-        # remove bad PN
         df = df[df["PN"].notna()]
         df = df[df["PN"] != ""]
         df = df[df["PN"].str.lower() != "nan"]
 
     # =========================
-    # IMPORTANT: NO SUM, NO GROUPBY
+    # REMOVE ANY IMPLICIT DUPLICATES
     # =========================
-    old = old.copy()
-    new = new.copy()
+    old = old.drop_duplicates(subset=["PN", "Position", "bom_qty"])
+    new = new.drop_duplicates(subset=["PN", "Position", "bom_qty"])
 
     # =========================
-    # MERGE ON PN ONLY (CRITICAL FIX)
+    # MERGE PROPERLY (CRITICAL FIX)
     # =========================
     df = old.merge(
         new,
-        on="PN",
+        on=["PN", "Position"],   # 🔥 FIX IMPORTANT
         how="outer",
         suffixes=("_old", "_new"),
         indicator=True
@@ -86,7 +85,6 @@ if start:
     # =========================
     def get_status(row):
 
-        # missing cases
         if row["_merge"] == "left_only":
             return "Missing in BOM2"
 
@@ -96,38 +94,29 @@ if start:
         qty_old = row["bom_qty_old"]
         qty_new = row["bom_qty_new"]
 
-        pos_old = str(row["Position_old"]).split(",") if pd.notna(row["Position_old"]) else []
-        pos_new = str(row["Position_new"]).split(",") if pd.notna(row["Position_new"]) else []
-
-        pos_old = set([p.strip() for p in pos_old])
-        pos_new = set([p.strip() for p in pos_new])
-
-        # priority 1: qty diff
+        # 1️⃣ Qty diff
         if qty_old != qty_new:
             return "Qty diff"
-
-        # priority 2: position diff
-        if pos_old != pos_new:
-            return "Position diff"
 
         return "Conform"
 
     df["Status"] = df.apply(get_status, axis=1)
 
     # =========================
-    # FINAL RESULT TABLE
+    # FINAL OUTPUT CLEAN
     # =========================
     result = pd.DataFrame({
         "PN": df["PN"],
 
-        "Desc OLD": df["Description_old"],
-        "Qty OLD": df["bom_qty_old"],
-        "Pos OLD": df["Position_old"],
+        "Desc OLD": df.get("Description_old"),
+        "Qty OLD": df.get("bom_qty_old"),
+        "Pos OLD": df.get("Position"),
 
         "PN NEW": df["PN"],
-        "Desc NEW": df["Description_new"],
-        "Qty NEW": df["bom_qty_new"],
-        "Pos NEW": df["Position_new"],
+
+        "Desc NEW": df.get("Description_new"),
+        "Qty NEW": df.get("bom_qty_new"),
+        "Pos NEW": df.get("Position"),
 
         "Status": df["Status"]
     })
@@ -148,8 +137,7 @@ if start:
         "Conform": "C6EFCE",
         "Missing in BOM1": "FFC7CE",
         "Missing in BOM2": "FFC7CE",
-        "Qty diff": "FFEB9C",
-        "Position diff": "BDD7EE"
+        "Qty diff": "FFEB9C"
     }
 
     status_col = None
