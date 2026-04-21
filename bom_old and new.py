@@ -57,21 +57,23 @@ if start:
     new = new.groupby(["PN", "Position", "Description"], as_index=False)["bom_qty"].sum()
 
     # ======================
-    # MERGE
+    # 🔥 IMPORTANT: MERGE ONLY ON PN
     # ======================
     df = old.merge(
         new,
-        on=["PN", "Position"],
+        on="PN",
         how="outer",
         suffixes=("_old", "_new"),
         indicator=True
-    ).fillna("")
+    )
+
+    df = df.fillna("")
 
     df["bom_qty_old"] = pd.to_numeric(df["bom_qty_old"], errors="coerce").fillna(0)
     df["bom_qty_new"] = pd.to_numeric(df["bom_qty_new"], errors="coerce").fillna(0)
 
     # ======================
-    # STATUS LOGIC (CORRECT)
+    # STATUS LOGIC
     # ======================
     def get_status(row):
 
@@ -80,14 +82,14 @@ if start:
             if (
                 row["Description_old"] == row["Description_new"] and
                 row["bom_qty_old"] == row["bom_qty_new"] and
-                row["Position"] == row["Position"]
+                row["Position_old"] == row["Position_new"]
             ):
                 return "Conform"
 
             elif (
                 row["Description_old"] == row["Description_new"] and
                 row["bom_qty_old"] == row["bom_qty_new"] and
-                row["Position"] != row["Position"]
+                row["Position_old"] != row["Position_new"]
             ):
                 return "Position Difference"
 
@@ -108,23 +110,29 @@ if start:
     df["Status"] = df.apply(get_status, axis=1)
 
     # ======================
-    # BUILD FINAL FORMAT (IMPORTANT)
+    # FINAL FORMAT (IMPORTANT)
     # ======================
     def format_row(row):
 
         return pd.Series({
+            # OLD side
             "PN": row["PN"] if row["_merge"] != "right_only" else "",
             "Desc OLD": row.get("Description_old", ""),
             "Qty OLD": row.get("bom_qty_old", ""),
-            "Pos OLD": row["Position"] if row["_merge"] != "right_only" else "",
+            "Pos OLD": row.get("Position_old", ""),
 
+            # NEW side
             "PN NEW": row["PN"] if row["_merge"] != "left_only" else "",
             "Desc NEW": row.get("Description_new", ""),
             "Qty NEW": row.get("bom_qty_new", ""),
-            "Pos NEW": row["Position"] if row["_merge"] != "left_only" else "",
+            "Pos NEW": row.get("Position_new", ""),
 
             "Status": row["Status"]
         })
+
+    # 🔥 align position columns properly
+    df["Position_old"] = df["Position_old"]
+    df["Position_new"] = df["Position_new"]
 
     result = df.apply(format_row, axis=1)
 
