@@ -16,9 +16,9 @@ start = st.button("🚀 Start Comparison")
 # SAFE FUNCTION
 # =========================
 def safe_join(x):
-    if isinstance(x, list):
-        return ", ".join(str(i) for i in x if pd.notna(i))
-    return str(x)
+    if not isinstance(x, list):
+        return ""
+    return ", ".join(str(i) for i in x if pd.notna(i))
 
 if start:
 
@@ -58,45 +58,60 @@ if start:
         )
         df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce").fillna(0)
 
-        # ❗ REMOVE INVALID PN
-        df = df[df["PN"].notna()]
-        df = df[df["PN"] != ""]
-        df = df[df["PN"].str.lower() != "nan"]
+    # =========================
+    # GROUP BY PN ONLY
+    # =========================
+    old = old.groupby(["PN"], as_index=False).agg({
+        "Description": "first",
+        "bom_qty": "sum",
+        "Position": list
+    })
+
+    new = new.groupby(["PN"], as_index=False).agg({
+        "Description": "first",
+        "bom_qty": "sum",
+        "Position": list
+    })
 
     # =========================
-    # ❌ IMPORTANT FIX: NO GROUPBY / NO SUM
-    # =========================
-    old = old.copy()
-    new = new.copy()
-
-    # =========================
-    # MERGE ON PN (LINE BY LINE)
+    # MERGE ON PN (LOGIQUE FLOWCHART)
     # =========================
     df = old.merge(
         new,
-        on=["PN", "Description", "Position"],
+        on="PN",
         how="outer",
         suffixes=("_old", "_new"),
         indicator=True
     )
 
     # =========================
-    # LOGIC
+    # LOGIC (SUIVANT TON FLOWCHART)
     # =========================
     def get_status(row):
 
+        # 1️⃣ Missing check
         if row["_merge"] == "left_only":
             return "Missing in BOM2"
 
         if row["_merge"] == "right_only":
             return "Missing in BOM1"
 
+        # 2️⃣ PN exists in both
         qty_old = row["bom_qty_old"]
         qty_new = row["bom_qty_new"]
 
+        pos_old = set(row["Position_old"]) if isinstance(row["Position_old"], list) else set()
+        pos_new = set(row["Position_new"]) if isinstance(row["Position_new"], list) else set()
+
+        # 3️⃣ Qty check
         if qty_old != qty_new:
             return "Qty diff"
 
+        # 4️⃣ Position check
+        if pos_old != pos_new:
+            return "Position diff"
+
+        # 5️⃣ Else
         return "Conform"
 
     df["Status"] = df.apply(get_status, axis=1)
@@ -108,21 +123,30 @@ if start:
 
     for _, row in df.iterrows():
 
-        result.append({
-            "PN": row["PN"],
-            "Desc OLD": row.get("Description", ""),
-            "Qty OLD": row.get("bom_qty_old", 0),
-            "Pos OLD": row.get("Position", ""),
+        pos_old = row["Position_old"] if isinstance(row["Position_old"], list) else []
+        pos_new = row["Position_new"] if isinstance(row["Position_new"], list) else []
 
-            "PN NEW": row["PN"],
-            "Desc NEW": row.get("Description", ""),
+        result.append({
+            "PN": row["PN"] if row["_merge"] != "right_only" else "",
+            "Desc OLD": row.get("Description_old", ""),
+            "Qty OLD": row.get("bom_qty_old", 0),
+            "Pos OLD": safe_join(pos_old),
+
+            "PN NEW": row["PN"] if row["_merge"] != "left_only" else "",
+            "Desc NEW": row.get("Description_new", ""),
             "Qty NEW": row.get("bom_qty_new", 0),
-            "Pos NEW": row.get("Position", ""),
+            "Pos NEW": safe_join(pos_new),
 
             "Status": row["Status"]
         })
 
     result = pd.DataFrame(result)
+
+    # =========================
+    # FIX STREAMLIT CRASH
+    # =========================
+    for col in result.columns:
+        result[col] = result[col].astype(str)
 
     st.dataframe(result, use_container_width=True)
 
@@ -140,7 +164,8 @@ if start:
         "Conform": "C6EFCE",
         "Missing in BOM1": "FFC7CE",
         "Missing in BOM2": "FFC7CE",
-        "Qty diff": "FFEB9C"
+        "Qty diff": "FFEB9C",
+        "Position diff": "BDD7EE"
     }
 
     status_col = None
@@ -166,3 +191,14 @@ if start:
         final_file,
         "BOM_comparison.xlsx"
     )
+
+# =========================================================
+# 🔵 YOUR LOGO SECTION (DO NOT MODIFY - KEEP YOUR ORIGINAL)
+# =========================================================
+# container_logo = Image.open("conteneur_logo.png")
+# stream_logo = Image.open("stream_logo.png")
+# col1, col2, col3 = st.columns([1, 5, 1])
+# with col1:
+#     st.image(container_logo)
+# with col3:
+#     st.image(stream_logo)
