@@ -12,9 +12,9 @@ new_file = st.file_uploader("📂 Upload NEW BOM", type=["xlsx"])
 
 start = st.button("🚀 Start Comparison")
 
-# ======================
+# =========================
 # SAFE FUNCTION
-# ======================
+# =========================
 def safe_join(x):
     if not isinstance(x, list):
         return ""
@@ -26,9 +26,9 @@ if start:
         st.error("❌ Upload both files")
         st.stop()
 
-    # ======================
+    # =========================
     # READ FILES
-    # ======================
+    # =========================
     old = pd.read_excel(old_file)
     new = pd.read_excel(new_file)
 
@@ -43,9 +43,9 @@ if start:
     old.rename(columns={"BOM text": "Position"}, inplace=True)
     new.rename(columns={"BOM text": "Position"}, inplace=True)
 
-    # ======================
+    # =========================
     # CLEAN
-    # ======================
+    # =========================
     for df in [old, new]:
         df["PN"] = df["PN"].astype(str).str.strip().str.upper()
         df["Description"] = df["Description"].astype(str).str.strip().str.upper()
@@ -58,9 +58,9 @@ if start:
         )
         df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce").fillna(0)
 
-    # ======================
-    # GROUP BY PN ONLY (IMPORTANT FIX)
-    # ======================
+    # =========================
+    # GROUP BY PN ONLY
+    # =========================
     old = old.groupby(["PN"], as_index=False).agg({
         "Description": "first",
         "bom_qty": "sum",
@@ -73,9 +73,9 @@ if start:
         "Position": list
     })
 
-    # ======================
-    # MERGE
-    # ======================
+    # =========================
+    # MERGE ON PN (LOGIQUE FLOWCHART)
+    # =========================
     df = old.merge(
         new,
         on="PN",
@@ -84,44 +84,41 @@ if start:
         indicator=True
     )
 
-    # ======================
-    # STATUS LOGIC
-    # ======================
+    # =========================
+    # LOGIC (SUIVANT TON FLOWCHART)
+    # =========================
     def get_status(row):
 
-        if row["_merge"] == "both":
-
-            qty_old = row["bom_qty_old"]
-            qty_new = row["bom_qty_new"]
-
-            pos_old = set(row["Position_old"]) if isinstance(row["Position_old"], list) else set()
-            pos_new = set(row["Position_new"]) if isinstance(row["Position_new"], list) else set()
-
-            if qty_old == qty_new and pos_old == pos_new:
-                return "Conform"
-
-            elif qty_old == qty_new and pos_old != pos_new:
-                return "Position diff"
-
-            elif qty_old != qty_new:
-                return "Qty diff"
-
-            else:
-                return "Check manual"
-
-        elif row["_merge"] == "left_only":
+        # 1️⃣ Missing check
+        if row["_merge"] == "left_only":
             return "Missing in BOM2"
 
-        elif row["_merge"] == "right_only":
+        if row["_merge"] == "right_only":
             return "Missing in BOM1"
 
-        return "Unknown"
+        # 2️⃣ PN exists in both
+        qty_old = row["bom_qty_old"]
+        qty_new = row["bom_qty_new"]
+
+        pos_old = set(row["Position_old"]) if isinstance(row["Position_old"], list) else set()
+        pos_new = set(row["Position_new"]) if isinstance(row["Position_new"], list) else set()
+
+        # 3️⃣ Qty check
+        if qty_old != qty_new:
+            return "Qty diff"
+
+        # 4️⃣ Position check
+        if pos_old != pos_new:
+            return "Position diff"
+
+        # 5️⃣ Else
+        return "Conform"
 
     df["Status"] = df.apply(get_status, axis=1)
 
-    # ======================
-    # BUILD FINAL RESULT
-    # ======================
+    # =========================
+    # BUILD RESULT
+    # =========================
     result = []
 
     for _, row in df.iterrows():
@@ -145,17 +142,17 @@ if start:
 
     result = pd.DataFrame(result)
 
-    # ======================
-    # FIX STREAMLIT PYARROW CRASH
-    # ======================
+    # =========================
+    # FIX STREAMLIT CRASH
+    # =========================
     for col in result.columns:
         result[col] = result[col].astype(str)
 
     st.dataframe(result, use_container_width=True)
 
-    # ======================
+    # =========================
     # EXPORT EXCEL
-    # ======================
+    # =========================
     output = io.BytesIO()
     result.to_excel(output, index=False)
     output.seek(0)
@@ -194,3 +191,14 @@ if start:
         final_file,
         "BOM_comparison.xlsx"
     )
+
+# =========================================================
+# 🔵 YOUR LOGO SECTION (DO NOT MODIFY - KEEP YOUR ORIGINAL)
+# =========================================================
+# container_logo = Image.open("conteneur_logo.png")
+# stream_logo = Image.open("stream_logo.png")
+# col1, col2, col3 = st.columns([1, 5, 1])
+# with col1:
+#     st.image(container_logo)
+# with col3:
+#     st.image(stream_logo)
