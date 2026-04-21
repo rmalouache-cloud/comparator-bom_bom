@@ -10,13 +10,6 @@ new_file = st.file_uploader("📂 Upload NEW BOM", type=["xlsx"])
 
 start = st.button("🚀 Start Comparison")
 
-# =========================
-def safe_join(x):
-    if isinstance(x, list):
-        return ", ".join(str(i) for i in x)
-    return str(x)
-
-# =========================
 if start:
 
     old = pd.read_excel(old_file)
@@ -48,33 +41,18 @@ if start:
         df = df[df["PN"].str.lower() != "nan"]
 
     # =========================
-    # GROUP BY PN (NO SUM, KEEP LISTS)
+    # MERGE EXACT LEVEL (IMPORTANT)
     # =========================
-    old_g = old.groupby("PN").agg({
-        "Description": "first",
-        "bom_qty": "first",
-        "Position": list
-    }).reset_index()
-
-    new_g = new.groupby("PN").agg({
-        "Description": "first",
-        "bom_qty": "first",
-        "Position": list
-    }).reset_index()
-
-    # =========================
-    # MERGE PN ONLY
-    # =========================
-    df = old_g.merge(
-        new_g,
-        on="PN",
+    df = old.merge(
+        new,
+        on=["PN", "Position"],
         how="outer",
         suffixes=("_old", "_new"),
         indicator=True
     )
 
     # =========================
-    # LOGIC FIXED
+    # STATUS
     # =========================
     def get_status(row):
 
@@ -84,41 +62,38 @@ if start:
         if row["_merge"] == "right_only":
             return "Missing in BOM1"
 
-        qty_old = row["bom_qty_old"]
-        qty_new = row["bom_qty_new"]
-
-        pos_old = set(row["Position_old"] if isinstance(row["Position_old"], list) else [])
-        pos_new = set(row["Position_new"] if isinstance(row["Position_new"], list) else [])
-
-        # ✔ PRIORITY 1: qty diff
-        if qty_old != qty_new:
+        if row["bom_qty_old"] != row["bom_qty_new"]:
             return "Qty diff"
-
-        # ✔ PRIORITY 2: position diff
-        if pos_old != pos_new:
-            return "Position diff"
 
         return "Conform"
 
     df["Status"] = df.apply(get_status, axis=1)
 
     # =========================
-    # FINAL OUTPUT CLEAN
+    # FINAL FORMAT EXACT LIKE YOUR SAMPLE
     # =========================
-    result = pd.DataFrame({
-        "PN": df["PN"],
+    result = df[[
+        "PN",
+        "Description_old",
+        "bom_qty_old",
+        "Position",
+        "PN",
+        "Description_new",
+        "bom_qty_new",
+        "Position",
+        "Status"
+    ]].copy()
 
-        "Desc OLD": df["Description_old"],
-        "Qty OLD": df["bom_qty_old"],
-        "Pos OLD": df["Position_old"].apply(safe_join),
-
-        "PN NEW": df["PN"],
-
-        "Desc NEW": df["Description_new"],
-        "Qty NEW": df["bom_qty_new"],
-        "Pos NEW": df["Position_new"].apply(safe_join),
-
-        "Status": df["Status"]
-    })
+    result.columns = [
+        "PN",
+        "Desc OLD",
+        "Qty OLD",
+        "Pos OLD",
+        "PN NEW",
+        "Desc NEW",
+        "Qty NEW",
+        "Pos NEW",
+        "Status"
+    ]
 
     st.dataframe(result, use_container_width=True)
