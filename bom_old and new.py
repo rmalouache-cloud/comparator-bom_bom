@@ -42,33 +42,60 @@ if start:
         df["PN"] = df["PN"].astype(str).str.strip().str.upper()
         df["Description"] = df["Description"].astype(str).str.strip().str.upper()
         df["Position"] = df["Position"].astype(str).str.strip().str.upper()
-        df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce").fillna(0)
+
+        df["bom_qty"] = (
+            df["bom_qty"]
+            .astype(str)
+            .str.replace(",", ".", regex=False)
+        )
+        df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce")
 
     # ======================
-    # 🔥 MERGE LINE BY LINE (NO SUM)
+    # REMOVE DUPLICATES
+    # ======================
+    old = old.groupby(["PN", "Position", "Description"], as_index=False)["bom_qty"].sum()
+    new = new.groupby(["PN", "Position", "Description"], as_index=False)["bom_qty"].sum()
+
+    # ======================
+    # MERGE
     # ======================
     df = old.merge(
         new,
-        on=["PN", "Description", "bom_qty"],
+        on=["PN", "Position"],
         how="outer",
         suffixes=("_old", "_new"),
         indicator=True
-    )
+    ).fillna("")
 
-    df = df.fillna("")
+    df["bom_qty_old"] = pd.to_numeric(df["bom_qty_old"], errors="coerce").fillna(0)
+    df["bom_qty_new"] = pd.to_numeric(df["bom_qty_new"], errors="coerce").fillna(0)
 
     # ======================
-    # STATUS LOGIC
+    # STATUS LOGIC (CORRECT)
     # ======================
     def get_status(row):
 
         if row["_merge"] == "both":
 
-            if row["Position_old"] == row["Position_new"]:
+            if (
+                row["Description_old"] == row["Description_new"] and
+                row["bom_qty_old"] == row["bom_qty_new"] and
+                row["Position"] == row["Position"]
+            ):
                 return "Conform"
 
-            else:
+            elif (
+                row["Description_old"] == row["Description_new"] and
+                row["bom_qty_old"] == row["bom_qty_new"] and
+                row["Position"] != row["Position"]
+            ):
                 return "Position Difference"
+
+            elif row["bom_qty_old"] != row["bom_qty_new"]:
+                return "Qty Difference"
+
+            else:
+                return "Check Manually"
 
         elif row["_merge"] == "left_only":
             return "Missing in BOM2"
@@ -81,23 +108,25 @@ if start:
     df["Status"] = df.apply(get_status, axis=1)
 
     # ======================
-    # FINAL FORMAT (CLEAN)
+    # BUILD FINAL FORMAT (IMPORTANT)
     # ======================
-    result = df[[
-        "PN",
-        "Description_old", "bom_qty_old", "Position_old",
-        "PN",
-        "Description_new", "bom_qty_new", "Position_new",
-        "Status"
-    ]]
+    def format_row(row):
 
-    result.columns = [
-        "PN",
-        "Desc OLD", "Qty OLD", "Pos OLD",
-        "PN NEW",
-        "Desc NEW", "Qty NEW", "Pos NEW",
-        "Status"
-    ]
+        return pd.Series({
+            "PN": row["PN"] if row["_merge"] != "right_only" else "",
+            "Desc OLD": row.get("Description_old", ""),
+            "Qty OLD": row.get("bom_qty_old", ""),
+            "Pos OLD": row["Position"] if row["_merge"] != "right_only" else "",
+
+            "PN NEW": row["PN"] if row["_merge"] != "left_only" else "",
+            "Desc NEW": row.get("Description_new", ""),
+            "Qty NEW": row.get("bom_qty_new", ""),
+            "Pos NEW": row["Position"] if row["_merge"] != "left_only" else "",
+
+            "Status": row["Status"]
+        })
+
+    result = df.apply(format_row, axis=1)
 
     st.dataframe(result, use_container_width=True)
 
