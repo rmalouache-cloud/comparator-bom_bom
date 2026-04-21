@@ -29,11 +29,6 @@ if start:
 
     cols = ["PN", "Description", "bom_qty", "BOM text"]
 
-    for col in cols:
-        if col not in old.columns or col not in new.columns:
-            st.error(f"❌ Missing column: {col}")
-            st.stop()
-
     old = old[cols].copy()
     new = new[cols].copy()
 
@@ -70,15 +65,13 @@ if start:
         how="outer",
         suffixes=("_old", "_new"),
         indicator=True
-    )
-
-    df = df.fillna("")
+    ).fillna("")
 
     df["bom_qty_old"] = pd.to_numeric(df["bom_qty_old"], errors="coerce").fillna(0)
     df["bom_qty_new"] = pd.to_numeric(df["bom_qty_new"], errors="coerce").fillna(0)
 
     # ======================
-    # STATUS
+    # STATUS LOGIC (CORRECT)
     # ======================
     def get_status(row):
 
@@ -86,15 +79,23 @@ if start:
 
             if (
                 row["Description_old"] == row["Description_new"] and
-                row["bom_qty_old"] == row["bom_qty_new"]
+                row["bom_qty_old"] == row["bom_qty_new"] and
+                row["Position"] == row["Position"]
             ):
                 return "Conform"
+
+            elif (
+                row["Description_old"] == row["Description_new"] and
+                row["bom_qty_old"] == row["bom_qty_new"] and
+                row["Position"] != row["Position"]
+            ):
+                return "Position Difference"
 
             elif row["bom_qty_old"] != row["bom_qty_new"]:
                 return "Qty Difference"
 
             else:
-                return "Position Difference"
+                return "Check Manually"
 
         elif row["_merge"] == "left_only":
             return "Missing in BOM2"
@@ -107,54 +108,23 @@ if start:
     df["Status"] = df.apply(get_status, axis=1)
 
     # ======================
-    # FORMAT FINAL OUTPUT (IMPORTANT 🔥)
+    # BUILD FINAL FORMAT (IMPORTANT)
     # ======================
     def format_row(row):
 
-        if row["Status"] == "Missing in BOM2":
-            return pd.Series({
-                "PN": row["PN"],
-                "Desc OLD": row["Description_old"],
-                "Qty OLD": row["bom_qty_old"],
-                "Pos OLD": row["Position"],
+        return pd.Series({
+            "PN": row["PN"] if row["_merge"] != "right_only" else "",
+            "Desc OLD": row.get("Description_old", ""),
+            "Qty OLD": row.get("bom_qty_old", ""),
+            "Pos OLD": row["Position"] if row["_merge"] != "right_only" else "",
 
-                "PN NEW": "",
-                "Desc NEW": "",
-                "Qty NEW": "",
-                "Pos NEW": "",
+            "PN NEW": row["PN"] if row["_merge"] != "left_only" else "",
+            "Desc NEW": row.get("Description_new", ""),
+            "Qty NEW": row.get("bom_qty_new", ""),
+            "Pos NEW": row["Position"] if row["_merge"] != "left_only" else "",
 
-                "Status": "Missing in BOM2"
-            })
-
-        elif row["Status"] == "Missing in BOM1":
-            return pd.Series({
-                "PN": "",
-                "Desc OLD": "",
-                "Qty OLD": "",
-                "Pos OLD": "",
-
-                "PN NEW": row["PN"],
-                "Desc NEW": row["Description_new"],
-                "Qty NEW": row["bom_qty_new"],
-                "Pos NEW": row["Position"],
-
-                "Status": "Missing in BOM1"
-            })
-
-        else:
-            return pd.Series({
-                "PN": row["PN"],
-                "Desc OLD": row["Description_old"],
-                "Qty OLD": row["bom_qty_old"],
-                "Pos OLD": row["Position"],
-
-                "PN NEW": row["PN"],
-                "Desc NEW": row["Description_new"],
-                "Qty NEW": row["bom_qty_new"],
-                "Pos NEW": row["Position"],
-
-                "Status": row["Status"]
-            })
+            "Status": row["Status"]
+        })
 
     result = df.apply(format_row, axis=1)
 
