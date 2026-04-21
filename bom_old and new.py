@@ -70,7 +70,7 @@ def extract_components_by_type(df, bom_type):
         else:
             return df.copy()  # Pas de ligne CKD trouvée, tout est SKD
 
-def run_comparison(old_df, new_df):
+def run_comparison(old_df, new_df, component_type="GENERAL"):
     """Exécute la comparaison entre deux DataFrames"""
     
     cols = ["PN", "Description", "bom_qty", "BOM text"]
@@ -148,6 +148,7 @@ def run_comparison(old_df, new_df):
         pos_new = row["Position_new"] if isinstance(row["Position_new"], list) else []
         
         result.append({
+            "Type": component_type,
             "PN": row["PN"] if row["_merge"] != "right_only" else "",
             "Desc OLD": row.get("Description_old", ""),
             "Qty OLD": row.get("bom_qty_old", 0),
@@ -161,15 +162,22 @@ def run_comparison(old_df, new_df):
     
     return pd.DataFrame(result)
 
-# Boutons pour le type de comparaison
-col1, col2 = st.columns(2)
+# =========================
+# 3 BOUTONS POUR LA COMPARAISON
+# =========================
+st.markdown("---")
+st.subheader("🔧 Sélectionnez le type de comparaison")
+
+col1, col2, col3 = st.columns(3)
 
 with col1:
-    ckd_button = st.button("🔧 Comparer CKD", use_container_width=True)
+    ckd_button = st.button("📟 CKD", use_container_width=True)
 with col2:
-    skd_button = st.button("📦 Comparer SKD", use_container_width=True)
+    skd_button = st.button("🔌 SKD", use_container_width=True)
+with col3:
+    both_button = st.button("🔄 CKD/SKD", use_container_width=True)
 
-if ckd_button or skd_button:
+if ckd_button or skd_button or both_button:
     
     if old_file is None or new_file is None:
         st.error("❌ Upload both files")
@@ -182,37 +190,80 @@ if ckd_button or skd_button:
     old.columns = old.columns.str.strip()
     new.columns = new.columns.str.strip()
     
-    # Déterminer quel type de comparaison effectuer
+    all_results = []
+    
+    # =========================
+    # CAS 1: BOUTON CKD SEULEMENT
+    # =========================
     if ckd_button:
         bom_type = "CKD"
-        st.info("🔍 Comparaison des composants CKD uniquement (de ASS'Y - MAIN BOARD（CKD） à BARCODE LABEL)")
-    else:
-        bom_type = "SKD"
-        st.info("📦 Comparaison des composants SKD uniquement (tout sauf CKD)")
-    
-    # Extraire les composants selon le type
-    old_filtered = extract_components_by_type(old, bom_type)
-    new_filtered = extract_components_by_type(new, bom_type)
-    
-    # Vérifier si des composants ont été trouvés
-    if old_filtered.empty and new_filtered.empty:
-        st.warning(f"⚠️ Aucun composant {bom_type} trouvé dans les fichiers")
-    else:
-        # Afficher le nombre de composants trouvés
-        st.info(f"📊 Composants {bom_type} trouvés: {len(old_filtered)} dans OLD BOM, {len(new_filtered)} dans NEW BOM")
+        st.info("📟 Comparaison des composants CKD uniquement")
         
-        # Exécuter la comparaison
-        result = run_comparison(old_filtered, new_filtered)
+        old_filtered = extract_components_by_type(old, "CKD")
+        new_filtered = extract_components_by_type(new, "CKD")
+        
+        if old_filtered.empty and new_filtered.empty:
+            st.warning("⚠️ Aucun composant CKD trouvé dans les fichiers")
+        else:
+            st.info(f"📊 Composants CKD trouvés: {len(old_filtered)} dans OLD BOM, {len(new_filtered)} dans NEW BOM")
+            result = run_comparison(old_filtered, new_filtered, "CKD")
+            all_results.append(result)
+    
+    # =========================
+    # CAS 2: BOUTON SKD SEULEMENT
+    # =========================
+    elif skd_button:
+        bom_type = "SKD"
+        st.info("🔌 Comparaison des composants SKD uniquement")
+        
+        old_filtered = extract_components_by_type(old, "SKD")
+        new_filtered = extract_components_by_type(new, "SKD")
+        
+        if old_filtered.empty and new_filtered.empty:
+            st.warning("⚠️ Aucun composant SKD trouvé dans les fichiers")
+        else:
+            st.info(f"📊 Composants SKD trouvés: {len(old_filtered)} dans OLD BOM, {len(new_filtered)} dans NEW BOM")
+            result = run_comparison(old_filtered, new_filtered, "SKD")
+            all_results.append(result)
+    
+    # =========================
+    # CAS 3: BOUTON CKD/SKD (LES DEUX ENSEMBLE)
+    # =========================
+    elif both_button:
+        st.info("🔄 Comparaison CKD + SKD ensemble (tous les composants)")
+        
+        # Extraire CKD et SKD séparément
+        old_ckd = extract_components_by_type(old, "CKD")
+        old_skd = extract_components_by_type(old, "SKD")
+        old_full = pd.concat([old_ckd, old_skd], ignore_index=True)
+        
+        new_ckd = extract_components_by_type(new, "CKD")
+        new_skd = extract_components_by_type(new, "SKD")
+        new_full = pd.concat([new_ckd, new_skd], ignore_index=True)
+        
+        st.info(f"📊 Comparaison complète: {len(old_full)} composants dans OLD BOM, {len(new_full)} dans NEW BOM")
+        st.info(f"   - CKD: {len(old_ckd)} (OLD) / {len(new_ckd)} (NEW)")
+        st.info(f"   - SKD: {len(old_skd)} (OLD) / {len(new_skd)} (NEW)")
+        
+        result = run_comparison(old_full, new_full, "COMPLET")
+        all_results.append(result)
+    
+    # =========================
+    # AFFICHER LES RÉSULTATS
+    # =========================
+    if all_results:
+        final_result = pd.concat(all_results, ignore_index=True)
         
         # Fix Streamlit crash
-        for col in result.columns:
-            result[col] = result[col].astype(str)
+        for col in final_result.columns:
+            final_result[col] = final_result[col].astype(str)
         
-        st.dataframe(result, use_container_width=True)
+        st.success(f"✅ Comparaison terminée! {len(final_result)} lignes trouvées")
+        st.dataframe(final_result, use_container_width=True)
         
         # Export Excel with colors
         output = io.BytesIO()
-        result.to_excel(output, index=False)
+        final_result.to_excel(output, index=False)
         output.seek(0)
         
         wb = load_workbook(output)
@@ -246,8 +297,18 @@ if ckd_button or skd_button:
         wb.save(final_file)
         final_file.seek(0)
         
+        # Nom du fichier selon le type de comparaison
+        if ckd_button:
+            filename = "BOM_comparison_CKD.xlsx"
+        elif skd_button:
+            filename = "BOM_comparison_SKD.xlsx"
+        else:
+            filename = "BOM_comparison_CKD_SKD.xlsx"
+        
         st.download_button(
-            f"📥 Télécharger Excel ({bom_type})",
+            f"📥 Télécharger Excel",
             final_file,
-            f"BOM_comparison_{bom_type}.xlsx"
+            filename
         )
+    else:
+        st.error("❌ Aucun résultat à afficher")
