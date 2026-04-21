@@ -14,18 +14,11 @@ start = st.button("🚀 Start Comparison")
 
 def safe_join(x):
     if isinstance(x, list):
-        return ", ".join(str(i) for i in x if pd.notna(i))
+        return ", ".join(str(i) for i in x)
     return str(x)
 
 if start:
 
-    if old_file is None or new_file is None:
-        st.error("❌ Upload both files")
-        st.stop()
-
-    # =========================
-    # READ
-    # =========================
     old = pd.read_excel(old_file)
     new = pd.read_excel(new_file)
 
@@ -57,34 +50,23 @@ if start:
         df = df[df["PN"] != ""]
         df = df[df["PN"].str.lower() != "nan"]
 
-    # =========================
-    # GROUP (NO SUM !!)
-    # =========================
-    old = old.groupby("PN", as_index=False).agg({
-        "Description": "first",
-        "bom_qty": "first",        # ❌ PAS DE SUM
-        "Position": lambda x: list(x)
-    })
-
-    new = new.groupby("PN", as_index=False).agg({
-        "Description": "first",
-        "bom_qty": "first",        # ❌ PAS DE SUM
-        "Position": lambda x: list(x)
-    })
+    # 🔥 IMPORTANT : NO GROUPBY, NO SUM, NO FIRST
+    old = old.copy()
+    new = new.copy()
 
     # =========================
-    # MERGE CLEAN
+    # MERGE LINE BY LINE
     # =========================
     df = old.merge(
         new,
-        on="PN",
+        on=["PN", "Description", "Position"],
         how="outer",
         suffixes=("_old", "_new"),
         indicator=True
     )
 
     # =========================
-    # STATUS LOGIC
+    # STATUS
     # =========================
     def get_status(row):
 
@@ -97,38 +79,35 @@ if start:
         if row["bom_qty_old"] != row["bom_qty_new"]:
             return "Qty diff"
 
-        pos_old = set(row["Position_old"]) if isinstance(row["Position_old"], list) else set()
-        pos_new = set(row["Position_new"]) if isinstance(row["Position_new"], list) else set()
-
-        if pos_old != pos_new:
-            return "Position diff"
-
         return "Conform"
 
     df["Status"] = df.apply(get_status, axis=1)
 
     # =========================
-    # FINAL FORMAT (PROPRE TABLE)
+    # FINAL OUTPUT CLEAN
     # =========================
-    result = pd.DataFrame({
-        "PN": df["PN"],
+    result = df[[
+        "PN",
+        "Description",
+        "bom_qty_old",
+        "Position",
+        "bom_qty_new",
+        "Status"
+    ]].copy()
 
-        "Desc OLD": df["Description_old"],
-        "Qty OLD": df["bom_qty_old"],
-        "Pos OLD": df["Position_old"].apply(safe_join),
-
-        "PN NEW": df["PN"],
-        "Desc NEW": df["Description_new"],
-        "Qty NEW": df["bom_qty_new"],
-        "Pos NEW": df["Position_new"].apply(safe_join),
-
-        "Status": df["Status"]
-    })
+    result.columns = [
+        "PN",
+        "Description",
+        "Qty OLD",
+        "Position OLD/NEW",
+        "Qty NEW",
+        "Status"
+    ]
 
     st.dataframe(result, use_container_width=True)
 
     # =========================
-    # EXPORT EXCEL
+    # EXPORT
     # =========================
     output = io.BytesIO()
     result.to_excel(output, index=False)
@@ -141,8 +120,7 @@ if start:
         "Conform": "C6EFCE",
         "Missing in BOM1": "FFC7CE",
         "Missing in BOM2": "FFC7CE",
-        "Qty diff": "FFEB9C",
-        "Position diff": "BDD7EE"
+        "Qty diff": "FFEB9C"
     }
 
     status_col = None
