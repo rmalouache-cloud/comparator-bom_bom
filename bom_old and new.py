@@ -51,18 +51,18 @@ if start:
         df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce").fillna(0)
 
     # ======================
-    # AGGREGATE (IMPORTANT FIX)
+    # AGGREGATION (IMPORTANT FIX)
     # ======================
     old = old.groupby(["PN"], as_index=False).agg({
         "Description": "first",
         "bom_qty": "sum",
-        "Position": lambda x: list(x)
+        "Position": list
     })
 
     new = new.groupby(["PN"], as_index=False).agg({
         "Description": "first",
         "bom_qty": "sum",
-        "Position": lambda x: list(x)
+        "Position": list
     })
 
     # ======================
@@ -77,7 +77,7 @@ if start:
     )
 
     # ======================
-    # STATUS LOGIC FIXED
+    # STATUS LOGIC
     # ======================
     def get_status(row):
 
@@ -112,52 +112,36 @@ if start:
     df["Status"] = df.apply(get_status, axis=1)
 
     # ======================
-    # BUILD RESULT FORMAT (LINE MATCH STYLE)
+    # BUILD FINAL RESULT
     # ======================
     result = []
 
     for _, row in df.iterrows():
 
-        if row["_merge"] == "both":
-            result.append({
-                "PN": row["PN"],
-                "Desc OLD": row["Description_old"],
-                "Qty OLD": row["bom_qty_old"],
-                "Pos OLD": row["Position_old"],
-                "PN NEW": row["PN"],
-                "Desc NEW": row["Description_new"],
-                "Qty NEW": row["bom_qty_new"],
-                "Pos NEW": row["Position_new"],
-                "Status": row["Status"]
-            })
+        pos_old = row["Position_old"] if isinstance(row["Position_old"], list) else []
+        pos_new = row["Position_new"] if isinstance(row["Position_new"], list) else []
 
-        elif row["_merge"] == "left_only":
-            result.append({
-                "PN": row["PN"],
-                "Desc OLD": row["Description_old"],
-                "Qty OLD": row["bom_qty_old"],
-                "Pos OLD": row["Position_old"],
-                "PN NEW": "",
-                "Desc NEW": "",
-                "Qty NEW": 0,
-                "Pos NEW": "",
-                "Status": "Missing in BOM2"
-            })
+        result.append({
+            "PN": row["PN"] if row["_merge"] != "right_only" else "",
+            "Desc OLD": row.get("Description_old", ""),
+            "Qty OLD": row.get("bom_qty_old", 0),
+            "Pos OLD": ", ".join(pos_old),
 
-        elif row["_merge"] == "right_only":
-            result.append({
-                "PN": row["PN"],
-                "Desc OLD": "",
-                "Qty OLD": 0,
-                "Pos OLD": "",
-                "PN NEW": row["PN"],
-                "Desc NEW": row["Description_new"],
-                "Qty NEW": row["bom_qty_new"],
-                "Pos NEW": row["Position_new"],
-                "Status": "Missing in BOM1"
-            })
+            "PN NEW": row["PN"] if row["_merge"] != "left_only" else "",
+            "Desc NEW": row.get("Description_new", ""),
+            "Qty NEW": row.get("bom_qty_new", 0),
+            "Pos NEW": ", ".join(pos_new),
+
+            "Status": row["Status"]
+        })
 
     result = pd.DataFrame(result)
+
+    # ======================
+    # SAFE TYPES (FIX STREAMLIT CRASH)
+    # ======================
+    for col in result.columns:
+        result[col] = result[col].astype(str)
 
     st.dataframe(result, use_container_width=True)
 
@@ -187,9 +171,9 @@ if start:
     for row in range(2, ws.max_row + 1):
         status = ws.cell(row=row, column=status_col).value
 
-        for key in colors:
+        for key, color in colors.items():
             if status == key:
-                fill = PatternFill(start_color=colors[key], fill_type="solid")
+                fill = PatternFill(start_color=color, fill_type="solid")
                 for col in range(1, ws.max_column + 1):
                     ws.cell(row=row, column=col).fill = fill
 
