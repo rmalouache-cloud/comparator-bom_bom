@@ -41,7 +41,7 @@ if start:
     new.rename(columns={"BOM text": "Position"}, inplace=True)
 
     # ======================
-    # CLEAN DATA
+    # CLEAN
     # ======================
     for df in [old, new]:
         df["PN"] = df["PN"].astype(str).str.strip().str.upper()
@@ -62,7 +62,7 @@ if start:
     new = new.groupby(["PN", "Position", "Description"], as_index=False)["bom_qty"].sum()
 
     # ======================
-    # MERGE (BASE)
+    # MERGE
     # ======================
     df = old.merge(
         new,
@@ -70,22 +70,15 @@ if start:
         how="outer",
         suffixes=("_old", "_new"),
         indicator=True
-    ).fillna("")
+    )
+
+    df = df.fillna("")
 
     df["bom_qty_old"] = pd.to_numeric(df["bom_qty_old"], errors="coerce").fillna(0)
     df["bom_qty_new"] = pd.to_numeric(df["bom_qty_new"], errors="coerce").fillna(0)
 
     # ======================
-    # FIX PN NEW + POS NEW
-    # ======================
-    df["PN_new"] = df["PN"]
-    df["Position_new"] = df["Position"]
-
-    df.loc[df["_merge"] == "left_only", "PN_new"] = ""
-    df.loc[df["_merge"] == "left_only", "Position_new"] = ""
-
-    # ======================
-    # STATUS LOGIC
+    # STATUS
     # ======================
     def get_status(row):
 
@@ -101,7 +94,7 @@ if start:
                 return "Qty Difference"
 
             else:
-                return "Check Manually"
+                return "Position Difference"
 
         elif row["_merge"] == "left_only":
             return "Missing in BOM2"
@@ -114,70 +107,56 @@ if start:
     df["Status"] = df.apply(get_status, axis=1)
 
     # ======================
-    # POSITION DIFFERENCE MERGE 🔥
+    # FORMAT FINAL OUTPUT (IMPORTANT 🔥)
     # ======================
-    missing_old = df[df["Status"] == "Missing in BOM2"].copy()
-    missing_new = df[df["Status"] == "Missing in BOM1"].copy()
+    def format_row(row):
 
-    missing_old["key"] = missing_old["PN"] + "|" + missing_old["Description_old"]
-    missing_new["key"] = missing_new["PN"] + "|" + missing_new["Description_new"]
+        if row["Status"] == "Missing in BOM2":
+            return pd.Series({
+                "PN": row["PN"],
+                "Desc OLD": row["Description_old"],
+                "Qty OLD": row["bom_qty_old"],
+                "Pos OLD": row["Position"],
 
-    merged_rows = []
-    used_old = []
-    used_new = []
+                "PN NEW": "",
+                "Desc NEW": "",
+                "Qty NEW": "",
+                "Pos NEW": "",
 
-    for i_old, row_old in missing_old.iterrows():
-
-        match = missing_new[missing_new["key"] == row_old["key"]]
-
-        if not match.empty:
-            i_new = match.index[0]
-            row_new = match.loc[i_new]
-
-            merged_rows.append({
-                "PN": row_old["PN"],
-                "Description_old": row_old["Description_old"],
-                "bom_qty_old": row_old["bom_qty_old"],
-                "Position": row_old["Position"],
-
-                "PN_new": row_new["PN"],
-                "Description_new": row_new["Description_new"],
-                "bom_qty_new": row_new["bom_qty_new"],
-                "Position_new": row_new["Position"],
-
-                "Status": "Position Difference"
+                "Status": "Missing in BOM2"
             })
 
-            used_old.append(i_old)
-            used_new.append(i_new)
+        elif row["Status"] == "Missing in BOM1":
+            return pd.Series({
+                "PN": "",
+                "Desc OLD": "",
+                "Qty OLD": "",
+                "Pos OLD": "",
 
-    # remove used rows only
-    df = df.drop(index=used_old + used_new, errors="ignore")
+                "PN NEW": row["PN"],
+                "Desc NEW": row["Description_new"],
+                "Qty NEW": row["bom_qty_new"],
+                "Pos NEW": row["Position"],
 
-    # add merged rows
-    df = pd.concat([df, pd.DataFrame(merged_rows)], ignore_index=True)
+                "Status": "Missing in BOM1"
+            })
 
-    # ======================
-    # FINAL TABLE FORMAT
-    # ======================
-    result = df[[
-        "PN",
-        "Description_old", "bom_qty_old", "Position",
-        "PN_new",
-        "Description_new", "bom_qty_new",
-        "Position_new",
-        "Status"
-    ]]
+        else:
+            return pd.Series({
+                "PN": row["PN"],
+                "Desc OLD": row["Description_old"],
+                "Qty OLD": row["bom_qty_old"],
+                "Pos OLD": row["Position"],
 
-    result.rename(columns={
-        "Description_old": "Desc OLD",
-        "bom_qty_old": "Qty OLD",
-        "Position": "Pos OLD",
-        "PN_new": "PN NEW",
-        "Description_new": "Desc NEW",
-        "bom_qty_new": "Qty NEW",
-        "Position_new": "Pos NEW"
-    }, inplace=True)
+                "PN NEW": row["PN"],
+                "Desc NEW": row["Description_new"],
+                "Qty NEW": row["bom_qty_new"],
+                "Pos NEW": row["Position"],
+
+                "Status": row["Status"]
+            })
+
+    result = df.apply(format_row, axis=1)
 
     st.dataframe(result, use_container_width=True)
 
