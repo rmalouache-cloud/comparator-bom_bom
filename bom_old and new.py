@@ -175,7 +175,7 @@ with col1:
 with col2:
     skd_button = st.button("🔌 SKD", use_container_width=True)
 with col3:
-    both_button = st.button("🔄 CKD/SKD", use_container_width=True)
+    both_button = st.button("🖥️ CKD/SKD", use_container_width=True)
 
 if ckd_button or skd_button or both_button:
     
@@ -230,7 +230,7 @@ if ckd_button or skd_button or both_button:
     # CAS 3: BOUTON CKD/SKD (LES DEUX ENSEMBLE)
     # =========================
     elif both_button:
-        st.info("🔄 Comparaison CKD + SKD ensemble (tous les composants)")
+        st.info("🖥️ Comparaison CKD + SKD ensemble (tous les composants)")
         
         # Extraire CKD et SKD séparément
         old_ckd = extract_components_by_type(old, "CKD")
