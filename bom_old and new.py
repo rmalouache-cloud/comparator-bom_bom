@@ -3,17 +3,8 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 import io
-from PIL import Image
 
 st.set_page_config(page_title="BOM Comparator", layout="wide")
-
-# Logo TV
-col_logo1, col_logo2, col_logo3 = st.columns([1, 2, 1])
-with col_logo2:
-    st.image("https://cdn-icons-png.flaticon.com/512/1792/1792772.png", width=100)  # Logo TV
-    # Ou utilisez votre propre fichier local:
-    # st.image("tv_logo.png", width=100)
-
 st.title("📊 BOM Comparison Tool")
 
 old_file = st.file_uploader("📂 Upload OLD BOM", type=["xlsx"])
@@ -34,12 +25,14 @@ def extract_components_by_type(df, bom_type):
     SKD: tout le reste
     """
     if bom_type == "CKD":
+        # Trouver l'index de début (ASS'Y - MAIN BOARD（CKD）)
         start_idx = None
         for idx, desc in enumerate(df['Description']):
             if 'ASS\'Y - MAIN BOARD（CKD）' in str(desc).upper() or 'ASSY - MAIN BOARD（CKD）' in str(desc).upper():
                 start_idx = idx
                 break
         
+        # Trouver l'index de fin (BARCODE LABEL)
         end_idx = None
         for idx, desc in enumerate(df['Description']):
             if 'BARCODE LABEL' in str(desc).upper():
@@ -51,14 +44,16 @@ def extract_components_by_type(df, bom_type):
         elif start_idx is not None:
             return df.iloc[start_idx:].copy()
         else:
-            return pd.DataFrame()
+            return pd.DataFrame()  # Pas de composants CKD trouvés
     else:  # SKD
+        # Trouver l'index de début (ASS'Y - MAIN BOARD（CKD）)
         start_idx = None
         for idx, desc in enumerate(df['Description']):
             if 'ASS\'Y - MAIN BOARD（CKD）' in str(desc).upper() or 'ASSY - MAIN BOARD（CKD）' in str(desc).upper():
                 start_idx = idx
                 break
         
+        # Trouver l'index de fin (BARCODE LABEL)
         end_idx = None
         for idx, desc in enumerate(df['Description']):
             if 'BARCODE LABEL' in str(desc).upper():
@@ -66,66 +61,51 @@ def extract_components_by_type(df, bom_type):
                 break
         
         if start_idx is not None and end_idx is not None:
+            # SKD = tout avant CKD + tout après BARCODE LABEL
             before_ckd = df.iloc[:start_idx].copy()
             after_ckd = df.iloc[end_idx+1:].copy()
             return pd.concat([before_ckd, after_ckd], ignore_index=True)
         elif start_idx is not None:
             return df.iloc[:start_idx].copy()
         else:
-            return df.copy()
+            return df.copy()  # Pas de ligne CKD trouvée, tout est SKD
 
-def run_comparison(old_df, new_df, bom_type_name):
+def run_comparison(old_df, new_df):
     """Exécute la comparaison entre deux DataFrames"""
-    
-    if old_df.empty and new_df.empty:
-        return pd.DataFrame()
     
     cols = ["PN", "Description", "bom_qty", "BOM text"]
     
-    # S'assurer que les colonnes existent
-    old = old_df[cols].copy() if not old_df.empty else pd.DataFrame(columns=cols)
-    new = new_df[cols].copy() if not new_df.empty else pd.DataFrame(columns=cols)
+    old = old_df[cols].copy()
+    new = new_df[cols].copy()
     
-    if old.empty and new.empty:
-        return pd.DataFrame()
-    
-    if not old.empty:
-        old.rename(columns={"BOM text": "Position"}, inplace=True)
-    if not new.empty:
-        new.rename(columns={"BOM text": "Position"}, inplace=True)
+    old.rename(columns={"BOM text": "Position"}, inplace=True)
+    new.rename(columns={"BOM text": "Position"}, inplace=True)
     
     # Clean data
     for df in [old, new]:
-        if not df.empty:
-            df["PN"] = df["PN"].astype(str).str.strip().str.upper()
-            df["Description"] = df["Description"].astype(str).str.strip().str.upper()
-            df["Position"] = df["Position"].astype(str).str.strip().str.upper()
-            
-            df["bom_qty"] = (
-                df["bom_qty"]
-                .astype(str)
-                .str.replace(",", ".", regex=False)
-            )
-            df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce").fillna(0)
+        df["PN"] = df["PN"].astype(str).str.strip().str.upper()
+        df["Description"] = df["Description"].astype(str).str.strip().str.upper()
+        df["Position"] = df["Position"].astype(str).str.strip().str.upper()
+        
+        df["bom_qty"] = (
+            df["bom_qty"]
+            .astype(str)
+            .str.replace(",", ".", regex=False)
+        )
+        df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce").fillna(0)
     
     # Group by PN only
-    if not old.empty:
-        old = old.groupby(["PN"], as_index=False).agg({
-            "Description": "first",
-            "bom_qty": "sum",
-            "Position": list
-        })
-    else:
-        old = pd.DataFrame(columns=["PN", "Description", "bom_qty", "Position"])
+    old = old.groupby(["PN"], as_index=False).agg({
+        "Description": "first",
+        "bom_qty": "sum",
+        "Position": list
+    })
     
-    if not new.empty:
-        new = new.groupby(["PN"], as_index=False).agg({
-            "Description": "first",
-            "bom_qty": "sum",
-            "Position": list
-        })
-    else:
-        new = pd.DataFrame(columns=["PN", "Description", "bom_qty", "Position"])
+    new = new.groupby(["PN"], as_index=False).agg({
+        "Description": "first",
+        "bom_qty": "sum",
+        "Position": list
+    })
     
     # Merge on PN
     df = old.merge(
@@ -168,7 +148,6 @@ def run_comparison(old_df, new_df, bom_type_name):
         pos_new = row["Position_new"] if isinstance(row["Position_new"], list) else []
         
         result.append({
-            "Type": bom_type_name,
             "PN": row["PN"] if row["_merge"] != "right_only" else "",
             "Desc OLD": row.get("Description_old", ""),
             "Qty OLD": row.get("bom_qty_old", 0),
@@ -182,31 +161,18 @@ def run_comparison(old_df, new_df, bom_type_name):
     
     return pd.DataFrame(result)
 
-# =========================
-# OPTIONS DE COMPARAISON
-# =========================
-st.markdown("---")
-st.subheader("🔧 Options de comparaison")
-
-col1, col2, col3 = st.columns(3)
+# Boutons pour le type de comparaison
+col1, col2 = st.columns(2)
 
 with col1:
-    compare_ckd = st.checkbox("📟 Comparer CKD", value=True)
+    ckd_button = st.button("🔧 Comparer CKD", use_container_width=True)
 with col2:
-    compare_skd = st.checkbox("🔌 Comparer SKD", value=True)
-with col3:
-    compare_both = st.checkbox("🔄 Comparer CKD + SKD ensemble", value=False)
+    skd_button = st.button("📦 Comparer SKD", use_container_width=True)
 
-start = st.button("🚀 Démarrer la comparaison", use_container_width=True)
-
-if start:
+if ckd_button or skd_button:
     
     if old_file is None or new_file is None:
-        st.error("❌ Veuillez uploader les deux fichiers")
-        st.stop()
-    
-    if not compare_ckd and not compare_skd and not compare_both:
-        st.error("❌ Veuillez sélectionner au moins une option de comparaison")
+        st.error("❌ Upload both files")
         st.stop()
     
     # Read files
@@ -216,66 +182,37 @@ if start:
     old.columns = old.columns.str.strip()
     new.columns = new.columns.str.strip()
     
-    all_results = []
+    # Déterminer quel type de comparaison effectuer
+    if ckd_button:
+        bom_type = "CKD"
+        st.info("🔍 Comparaison des composants CKD uniquement (de ASS'Y - MAIN BOARD（CKD） à BARCODE LABEL)")
+    else:
+        bom_type = "SKD"
+        st.info("📦 Comparaison des composants SKD uniquement (tout sauf CKD)")
     
-    # Comparaison CKD seule
-    if compare_ckd:
-        with st.spinner("🔍 Comparaison CKD en cours... (📟 carte mère)"):
-            old_ckd = extract_components_by_type(old, "CKD")
-            new_ckd = extract_components_by_type(new, "CKD")
-            
-            if old_ckd.empty and new_ckd.empty:
-                st.warning("⚠️ Aucun composant CKD trouvé")
-            else:
-                st.info(f"📟 CKD: {len(old_ckd)} composants dans OLD, {len(new_ckd)} dans NEW")
-                result_ckd = run_comparison(old_ckd, new_ckd, "CKD")
-                if not result_ckd.empty:
-                    all_results.append(result_ckd)
+    # Extraire les composants selon le type
+    old_filtered = extract_components_by_type(old, bom_type)
+    new_filtered = extract_components_by_type(new, bom_type)
     
-    # Comparaison SKD seule
-    if compare_skd:
-        with st.spinner("🔍 Comparaison SKD en cours... (🔌 câbles)"):
-            old_skd = extract_components_by_type(old, "SKD")
-            new_skd = extract_components_by_type(new, "SKD")
-            
-            if old_skd.empty and new_skd.empty:
-                st.warning("⚠️ Aucun composant SKD trouvé")
-            else:
-                st.info(f"🔌 SKD: {len(old_skd)} composants dans OLD, {len(new_skd)} dans NEW")
-                result_skd = run_comparison(old_skd, new_skd, "SKD")
-                if not result_skd.empty:
-                    all_results.append(result_skd)
-    
-    # Comparaison CKD + SKD ensemble (fusionnés)
-    if compare_both:
-        with st.spinner("🔄 Comparaison complète CKD + SKD en cours..."):
-            old_ckd_full = extract_components_by_type(old, "CKD")
-            old_skd_full = extract_components_by_type(old, "SKD")
-            old_full = pd.concat([old_ckd_full, old_skd_full], ignore_index=True)
-            
-            new_ckd_full = extract_components_by_type(new, "CKD")
-            new_skd_full = extract_components_by_type(new, "SKD")
-            new_full = pd.concat([new_ckd_full, new_skd_full], ignore_index=True)
-            
-            st.info(f"🔄 Comparaison complète: {len(old_full)} composants dans OLD, {len(new_full)} dans NEW")
-            result_both = run_comparison(old_full, new_full, "COMPLET")
-            if not result_both.empty:
-                all_results.append(result_both)
-    
-    # Combiner tous les résultats
-    if all_results:
-        final_result = pd.concat(all_results, ignore_index=True)
+    # Vérifier si des composants ont été trouvés
+    if old_filtered.empty and new_filtered.empty:
+        st.warning(f"⚠️ Aucun composant {bom_type} trouvé dans les fichiers")
+    else:
+        # Afficher le nombre de composants trouvés
+        st.info(f"📊 Composants {bom_type} trouvés: {len(old_filtered)} dans OLD BOM, {len(new_filtered)} dans NEW BOM")
+        
+        # Exécuter la comparaison
+        result = run_comparison(old_filtered, new_filtered)
         
         # Fix Streamlit crash
-        for col in final_result.columns:
-            final_result[col] = final_result[col].astype(str)
+        for col in result.columns:
+            result[col] = result[col].astype(str)
         
-        st.success(f"✅ Comparaison terminée! {len(final_result)} lignes trouvées")
-        st.dataframe(final_result, use_container_width=True)
+        st.dataframe(result, use_container_width=True)
         
         # Export Excel with colors
         output = io.BytesIO()
-        final_result.to_excel(output, index=False)
+        result.to_excel(output, index=False)
         output.seek(0)
         
         wb = load_workbook(output)
@@ -310,9 +247,7 @@ if start:
         final_file.seek(0)
         
         st.download_button(
-            "📥 Télécharger Excel",
+            f"📥 Télécharger Excel ({bom_type})",
             final_file,
-            "BOM_comparison.xlsx"
+            f"BOM_comparison_{bom_type}.xlsx"
         )
-    else:
-        st.error("❌ Aucun résultat à afficher")
