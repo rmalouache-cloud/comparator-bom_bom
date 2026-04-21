@@ -19,7 +19,7 @@ if start:
         st.stop()
 
     # ======================
-    # READ
+    # READ FILES
     # ======================
     old = pd.read_excel(old_file)
     new = pd.read_excel(new_file)
@@ -45,28 +45,17 @@ if start:
         df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce").fillna(0)
 
     # ======================
-    # GROUP BY PN + DESC (IMPORTANT 🔥)
+    # 🔥 MERGE LINE BY LINE (NO SUM)
     # ======================
-    old_g = old.groupby(["PN", "Description"], as_index=False).agg({
-        "bom_qty": "sum",
-        "Position": lambda x: list(x)
-    })
-
-    new_g = new.groupby(["PN", "Description"], as_index=False).agg({
-        "bom_qty": "sum",
-        "Position": lambda x: list(x)
-    })
-
-    # ======================
-    # MERGE ON PN + DESC
-    # ======================
-    df = old_g.merge(
-        new_g,
-        on=["PN", "Description"],
+    df = old.merge(
+        new,
+        on=["PN", "Description", "bom_qty"],
         how="outer",
         suffixes=("_old", "_new"),
         indicator=True
-    ).fillna("")
+    )
+
+    df = df.fillna("")
 
     # ======================
     # STATUS LOGIC
@@ -75,14 +64,8 @@ if start:
 
         if row["_merge"] == "both":
 
-            old_pos = set(row["Position_old"]) if isinstance(row["Position_old"], list) else set()
-            new_pos = set(row["Position_new"]) if isinstance(row["Position_new"], list) else set()
-
-            if old_pos == new_pos:
+            if row["Position_old"] == row["Position_new"]:
                 return "Conform"
-
-            elif row["bom_qty_old"] != row["bom_qty_new"]:
-                return "Qty Difference"
 
             else:
                 return "Position Difference"
@@ -98,39 +81,28 @@ if start:
     df["Status"] = df.apply(get_status, axis=1)
 
     # ======================
-    # FLATTEN POSITIONS (NO DUPLICATE PROBLEM)
+    # FINAL FORMAT (CLEAN)
     # ======================
-    result_rows = []
+    result = df[[
+        "PN",
+        "Description_old", "bom_qty_old", "Position_old",
+        "PN",
+        "Description_new", "bom_qty_new", "Position_new",
+        "Status"
+    ]]
 
-    for _, row in df.iterrows():
-
-        old_pos = row["Position_old"] if isinstance(row["Position_old"], list) else []
-        new_pos = row["Position_new"] if isinstance(row["Position_new"], list) else []
-
-        max_len = max(len(old_pos), len(new_pos))
-
-        for i in range(max_len):
-
-            result_rows.append({
-                "PN": row["PN"] if row["_merge"] != "right_only" else "",
-                "Desc OLD": row["Description"] if row["_merge"] != "right_only" else "",
-                "Qty OLD": row["bom_qty_old"] if row["_merge"] != "right_only" else "",
-                "Pos OLD": old_pos[i] if i < len(old_pos) else "",
-
-                "PN NEW": row["PN"] if row["_merge"] != "left_only" else "",
-                "Desc NEW": row["Description"] if row["_merge"] != "left_only" else "",
-                "Qty NEW": row["bom_qty_new"] if row["_merge"] != "left_only" else "",
-                "Pos NEW": new_pos[i] if i < len(new_pos) else "",
-
-                "Status": row["Status"]
-            })
-
-    result = pd.DataFrame(result_rows)
+    result.columns = [
+        "PN",
+        "Desc OLD", "Qty OLD", "Pos OLD",
+        "PN NEW",
+        "Desc NEW", "Qty NEW", "Pos NEW",
+        "Status"
+    ]
 
     st.dataframe(result, use_container_width=True)
 
     # ======================
-    # EXPORT
+    # EXPORT EXCEL
     # ======================
     output = io.BytesIO()
     result.to_excel(output, index=False)
