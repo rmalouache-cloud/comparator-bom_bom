@@ -165,9 +165,9 @@ def run_comparison(old_df, new_df):
 col1, col2 = st.columns(2)
 
 with col1:
-    ckd_button = st.button("🔧 Comparer CKD", use_container_width=True)
+    ckd_button = st.button("📟Comparer CKD", use_container_width=True)
 with col2:
-    skd_button = st.button("📦 Comparer SKD", use_container_width=True)
+    skd_button = st.button("🔌 Comparer SKD", use_container_width=True)
 
 if ckd_button or skd_button:
     
@@ -188,7 +188,7 @@ if ckd_button or skd_button:
         st.info("🔍 Comparaison des composants CKD uniquement (de ASS'Y - MAIN BOARD（CKD） à BARCODE LABEL)")
     else:
         bom_type = "SKD"
-        st.info("📦 Comparaison des composants SKD uniquement (tout sauf CKD)")
+        st.info("🔌 Comparaison des composants SKD uniquement (tout sauf CKD)")
     
     # Extraire les composants selon le type
     old_filtered = extract_components_by_type(old, bom_type)
