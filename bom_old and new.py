@@ -18,9 +18,6 @@ if start:
         st.error("❌ Upload both files")
         st.stop()
 
-    # ======================
-    # READ FILES
-    # ======================
     old = pd.read_excel(old_file)
     new = pd.read_excel(new_file)
 
@@ -32,8 +29,6 @@ if start:
     for col in cols:
         if col not in old.columns or col not in new.columns:
             st.error(f"❌ Missing column: {col}")
-            st.write("OLD:", old.columns)
-            st.write("NEW:", new.columns)
             st.stop()
 
     old = old[cols].copy()
@@ -42,14 +37,11 @@ if start:
     old.rename(columns={"BOM text": "Position"}, inplace=True)
     new.rename(columns={"BOM text": "Position"}, inplace=True)
 
-    # ======================
     # CLEAN
-    # ======================
     for df_ in [old, new]:
         df_["PN"] = df_["PN"].astype(str).str.strip().str.upper()
         df_["Description"] = df_["Description"].astype(str).str.strip().str.upper()
         df_["Position"] = df_["Position"].astype(str).str.strip().str.upper()
-
         df_["bom_qty"] = (
             df_["bom_qty"]
             .astype(str)
@@ -57,67 +49,51 @@ if start:
         )
         df_["bom_qty"] = pd.to_numeric(df_["bom_qty"], errors="coerce")
 
-    # ======================
     # REMOVE DUPLICATES
-    # ======================
     old = old.groupby(["PN", "Position", "Description"], as_index=False)["bom_qty"].sum()
     new = new.groupby(["PN", "Position", "Description"], as_index=False)["bom_qty"].sum()
 
-    # ======================
-    # MERGE PN + POSITION
-    # ======================
+    # MERGE
     df = old.merge(
         new,
         on=["PN", "Position"],
         how="outer",
         suffixes=("_old", "_new"),
         indicator=True
-    )
-
-    df = df.fillna("")
+    ).fillna("")
 
     df["bom_qty_old"] = pd.to_numeric(df["bom_qty_old"], errors="coerce").fillna(0)
     df["bom_qty_new"] = pd.to_numeric(df["bom_qty_new"], errors="coerce").fillna(0)
 
-    # ======================
-    # FIX PN NEW 🔥
-    # ======================
+    # PN NEW
     df["PN_new"] = df["PN"]
     df.loc[df["_merge"] == "left_only", "PN_new"] = ""
-    df.loc[df["_merge"] == "right_only", "PN_new"] = df["PN"]
 
-    # ======================
-    # INITIAL STATUS
-    # ======================
+    # POSITION NEW
+    df["Position_new"] = df["Position"]
+    df.loc[df["_merge"] == "left_only", "Position_new"] = ""
+
+    # STATUS
     def get_status(row):
-
         if row["_merge"] == "both":
-
             if (
                 row["Description_old"] == row["Description_new"] and
                 row["bom_qty_old"] == row["bom_qty_new"]
             ):
                 return "Conform"
-
             elif row["bom_qty_old"] != row["bom_qty_new"]:
                 return "Qty Difference"
-
             else:
                 return "Check Manually"
-
         elif row["_merge"] == "left_only":
             return "Missing in BOM2"
-
         elif row["_merge"] == "right_only":
             return "Missing in BOM1"
-
         return "Unknown"
 
     df["Status"] = df.apply(get_status, axis=1)
 
-    # ======================
-    # MERGE POSITION DIFFERENCE INTO ONE ROW 🔥
-    # ======================
+    # 🔥 FIX POSITION DIFFERENCE
     missing_old = df[df["Status"] == "Missing in BOM2"].copy()
     missing_new = df[df["Status"] == "Missing in BOM1"].copy()
 
@@ -125,12 +101,9 @@ if start:
     missing_new["key"] = missing_new["PN"] + "|" + missing_new["Description_new"]
 
     merged_rows = []
-    used_keys = set()
 
     for _, row_old in missing_old.iterrows():
-        key = row_old["key"]
-
-        match = missing_new[missing_new["key"] == key]
+        match = missing_new[missing_new["key"] == row_old["key"]]
 
         if not match.empty:
             row_new = match.iloc[0]
@@ -144,47 +117,40 @@ if start:
                 "PN_new": row_new["PN"],
                 "Description_new": row_new["Description_new"],
                 "bom_qty_new": row_new["bom_qty_new"],
+                "Position_new": row_new["Position"],
 
                 "Status": "Position Difference"
             })
 
-            used_keys.add(key)
+    # remove old missing rows
+    df = df[~df["Status"].isin(["Missing in BOM1", "Missing in BOM2"])]
 
-    # supprimer anciennes lignes
-    df = df[~(
-        (df["Status"].isin(["Missing in BOM1", "Missing in BOM2"])) &
-        ((df["PN"] + "|" + df["Description_old"]).isin(used_keys) |
-         (df["PN"] + "|" + df["Description_new"]).isin(used_keys))
-    )]
-
-    # ajouter fusion
+    # add merged rows
     df = pd.concat([df, pd.DataFrame(merged_rows)], ignore_index=True)
 
-    # ======================
     # FINAL TABLE
-    # ======================
     result = df[[
         "PN",
         "Description_old", "bom_qty_old", "Position",
         "PN_new",
         "Description_new", "bom_qty_new",
+        "Position_new",
         "Status"
     ]]
 
     result.rename(columns={
         "Description_old": "Desc OLD",
         "bom_qty_old": "Qty OLD",
-        "Position": "Pos",
+        "Position": "Pos OLD",
         "PN_new": "PN NEW",
         "Description_new": "Desc NEW",
-        "bom_qty_new": "Qty NEW"
+        "bom_qty_new": "Qty NEW",
+        "Position_new": "Pos NEW"
     }, inplace=True)
 
     st.dataframe(result, use_container_width=True)
 
-    # ======================
     # EXPORT EXCEL
-    # ======================
     output = io.BytesIO()
     result.to_excel(output, index=False)
     output.seek(0)
@@ -192,43 +158,29 @@ if start:
     wb = load_workbook(output)
     ws = wb.active
 
-    green = PatternFill(start_color="C6EFCE", fill_type="solid")
-    red = PatternFill(start_color="FFC7CE", fill_type="solid")
-    orange = PatternFill(start_color="FFEB9C", fill_type="solid")
-    blue = PatternFill(start_color="BDD7EE", fill_type="solid")
+    colors = {
+        "Conform": "C6EFCE",
+        "Missing": "FFC7CE",
+        "Qty Difference": "FFEB9C",
+        "Position Difference": "BDD7EE"
+    }
 
     status_col = None
     for col in range(1, ws.max_column + 1):
         if ws.cell(row=1, column=col).value == "Status":
             status_col = col
 
-    if status_col is None:
-        st.error("❌ Status column not found")
-        st.stop()
-
     for row in range(2, ws.max_row + 1):
         status = ws.cell(row=row, column=status_col).value
 
-        if status == "Conform":
-            fill = green
-        elif "Missing" in status:
-            fill = red
-        elif status == "Qty Difference":
-            fill = orange
-        elif status == "Position Difference":
-            fill = blue
-        else:
-            continue
-
-        for col in range(1, ws.max_column + 1):
-            ws.cell(row=row, column=col).fill = fill
+        for key in colors:
+            if key in str(status):
+                fill = PatternFill(start_color=colors[key], fill_type="solid")
+                for col in range(1, ws.max_column + 1):
+                    ws.cell(row=row, column=col).fill = fill
 
     final_file = io.BytesIO()
     wb.save(final_file)
     final_file.seek(0)
 
-    st.download_button(
-        "📥 Download Excel",
-        final_file,
-        "BOM_comparison.xlsx"
-    )
+    st.download_button("📥 Download Excel", final_file, "BOM_comparison.xlsx")
