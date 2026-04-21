@@ -18,6 +18,9 @@ if start:
         st.error("❌ Upload both files")
         st.stop()
 
+    # ======================
+    # READ FILES
+    # ======================
     old = pd.read_excel(old_file)
     new = pd.read_excel(new_file)
 
@@ -37,23 +40,30 @@ if start:
     old.rename(columns={"BOM text": "Position"}, inplace=True)
     new.rename(columns={"BOM text": "Position"}, inplace=True)
 
-    # CLEAN
-    for df_ in [old, new]:
-        df_["PN"] = df_["PN"].astype(str).str.strip().str.upper()
-        df_["Description"] = df_["Description"].astype(str).str.strip().str.upper()
-        df_["Position"] = df_["Position"].astype(str).str.strip().str.upper()
-        df_["bom_qty"] = (
-            df_["bom_qty"]
+    # ======================
+    # CLEAN DATA
+    # ======================
+    for df in [old, new]:
+        df["PN"] = df["PN"].astype(str).str.strip().str.upper()
+        df["Description"] = df["Description"].astype(str).str.strip().str.upper()
+        df["Position"] = df["Position"].astype(str).str.strip().str.upper()
+
+        df["bom_qty"] = (
+            df["bom_qty"]
             .astype(str)
             .str.replace(",", ".", regex=False)
         )
-        df_["bom_qty"] = pd.to_numeric(df_["bom_qty"], errors="coerce")
+        df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce")
 
+    # ======================
     # REMOVE DUPLICATES
+    # ======================
     old = old.groupby(["PN", "Position", "Description"], as_index=False)["bom_qty"].sum()
     new = new.groupby(["PN", "Position", "Description"], as_index=False)["bom_qty"].sum()
 
-    # MERGE
+    # ======================
+    # MERGE (BASE)
+    # ======================
     df = old.merge(
         new,
         on=["PN", "Position"],
@@ -65,35 +75,47 @@ if start:
     df["bom_qty_old"] = pd.to_numeric(df["bom_qty_old"], errors="coerce").fillna(0)
     df["bom_qty_new"] = pd.to_numeric(df["bom_qty_new"], errors="coerce").fillna(0)
 
-    # PN NEW
+    # ======================
+    # FIX PN NEW + POS NEW
+    # ======================
     df["PN_new"] = df["PN"]
-    df.loc[df["_merge"] == "left_only", "PN_new"] = ""
-
-    # POSITION NEW
     df["Position_new"] = df["Position"]
+
+    df.loc[df["_merge"] == "left_only", "PN_new"] = ""
     df.loc[df["_merge"] == "left_only", "Position_new"] = ""
 
-    # STATUS
+    # ======================
+    # STATUS LOGIC
+    # ======================
     def get_status(row):
+
         if row["_merge"] == "both":
+
             if (
                 row["Description_old"] == row["Description_new"] and
                 row["bom_qty_old"] == row["bom_qty_new"]
             ):
                 return "Conform"
+
             elif row["bom_qty_old"] != row["bom_qty_new"]:
                 return "Qty Difference"
+
             else:
                 return "Check Manually"
+
         elif row["_merge"] == "left_only":
             return "Missing in BOM2"
+
         elif row["_merge"] == "right_only":
             return "Missing in BOM1"
+
         return "Unknown"
 
     df["Status"] = df.apply(get_status, axis=1)
 
-    # 🔥 FIX POSITION DIFFERENCE
+    # ======================
+    # POSITION DIFFERENCE MERGE 🔥
+    # ======================
     missing_old = df[df["Status"] == "Missing in BOM2"].copy()
     missing_new = df[df["Status"] == "Missing in BOM1"].copy()
 
@@ -101,12 +123,16 @@ if start:
     missing_new["key"] = missing_new["PN"] + "|" + missing_new["Description_new"]
 
     merged_rows = []
+    used_old = []
+    used_new = []
 
-    for _, row_old in missing_old.iterrows():
+    for i_old, row_old in missing_old.iterrows():
+
         match = missing_new[missing_new["key"] == row_old["key"]]
 
         if not match.empty:
-            row_new = match.iloc[0]
+            i_new = match.index[0]
+            row_new = match.loc[i_new]
 
             merged_rows.append({
                 "PN": row_old["PN"],
@@ -122,13 +148,18 @@ if start:
                 "Status": "Position Difference"
             })
 
-    # remove old missing rows
-    df = df[~df["Status"].isin(["Missing in BOM1", "Missing in BOM2"])]
+            used_old.append(i_old)
+            used_new.append(i_new)
+
+    # remove used rows only
+    df = df.drop(index=used_old + used_new, errors="ignore")
 
     # add merged rows
     df = pd.concat([df, pd.DataFrame(merged_rows)], ignore_index=True)
 
-    # FINAL TABLE
+    # ======================
+    # FINAL TABLE FORMAT
+    # ======================
     result = df[[
         "PN",
         "Description_old", "bom_qty_old", "Position",
@@ -150,7 +181,9 @@ if start:
 
     st.dataframe(result, use_container_width=True)
 
+    # ======================
     # EXPORT EXCEL
+    # ======================
     output = io.BytesIO()
     result.to_excel(output, index=False)
     output.seek(0)
@@ -183,4 +216,8 @@ if start:
     wb.save(final_file)
     final_file.seek(0)
 
-    st.download_button("📥 Download Excel", final_file, "BOM_comparison.xlsx")
+    st.download_button(
+        "📥 Download Excel",
+        final_file,
+        "BOM_comparison.xlsx"
+    )
