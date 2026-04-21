@@ -12,6 +12,14 @@ new_file = st.file_uploader("📂 Upload NEW BOM", type=["xlsx"])
 
 start = st.button("🚀 Start Comparison")
 
+# ======================
+# SAFE FUNCTION
+# ======================
+def safe_join(x):
+    if not isinstance(x, list):
+        return ""
+    return ", ".join(str(i) for i in x if pd.notna(i))
+
 if start:
 
     if old_file is None or new_file is None:
@@ -51,7 +59,7 @@ if start:
         df["bom_qty"] = pd.to_numeric(df["bom_qty"], errors="coerce").fillna(0)
 
     # ======================
-    # AGGREGATION (IMPORTANT FIX)
+    # GROUP BY PN ONLY (IMPORTANT FIX)
     # ======================
     old = old.groupby(["PN"], as_index=False).agg({
         "Description": "first",
@@ -66,7 +74,7 @@ if start:
     })
 
     # ======================
-    # MERGE ONLY ON PN
+    # MERGE
     # ======================
     df = old.merge(
         new,
@@ -125,12 +133,12 @@ if start:
             "PN": row["PN"] if row["_merge"] != "right_only" else "",
             "Desc OLD": row.get("Description_old", ""),
             "Qty OLD": row.get("bom_qty_old", 0),
-            "Pos OLD": ", ".join(pos_old),
+            "Pos OLD": safe_join(pos_old),
 
             "PN NEW": row["PN"] if row["_merge"] != "left_only" else "",
             "Desc NEW": row.get("Description_new", ""),
             "Qty NEW": row.get("bom_qty_new", 0),
-            "Pos NEW": ", ".join(pos_new),
+            "Pos NEW": safe_join(pos_new),
 
             "Status": row["Status"]
         })
@@ -138,7 +146,7 @@ if start:
     result = pd.DataFrame(result)
 
     # ======================
-    # SAFE TYPES (FIX STREAMLIT CRASH)
+    # FIX STREAMLIT PYARROW CRASH
     # ======================
     for col in result.columns:
         result[col] = result[col].astype(str)
