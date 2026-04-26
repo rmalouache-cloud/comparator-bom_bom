@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from openpyxl import load_workbook
-from openpyxl.styles import PatternFill
+from openpyxl.styles import PatternFill, Border, Side
 import io
 from typing import Tuple, Optional
 
@@ -176,9 +176,22 @@ def run_comparison(old_df: pd.DataFrame, new_df: pd.DataFrame, component_type: s
     
     return pd.DataFrame(result)
 
-def add_excel_coloring(wb, colors: dict):
-    """Ajoute la coloration conditionnelle au fichier Excel"""
+def apply_excel_styling(wb, colors: dict):
+    """Applique la coloration conditionnelle et les bordures au fichier Excel"""
     ws = wb.active
+    
+    # Définir le style de bordure noire
+    thin_border = Border(
+        left=Side(style='thin', color='000000'),
+        right=Side(style='thin', color='000000'),
+        top=Side(style='thin', color='000000'),
+        bottom=Side(style='thin', color='000000')
+    )
+    
+    # Appliquer les bordures à toutes les cellules utilisées
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+        for cell in row:
+            cell.border = thin_border
     
     # Trouver la colonne Statut
     status_col = None
@@ -187,6 +200,7 @@ def add_excel_coloring(wb, colors: dict):
             status_col = col
             break
     
+    # Appliquer les couleurs de fond selon le statut
     if status_col:
         for row in range(2, ws.max_row + 1):
             status = ws.cell(row=row, column=status_col).value
@@ -195,6 +209,24 @@ def add_excel_coloring(wb, colors: dict):
                     fill = PatternFill(start_color=color, fill_type="solid")
                     for col in range(1, ws.max_column + 1):
                         ws.cell(row=row, column=col).fill = fill
+    
+    # Ajuster la largeur des colonnes automatiquement
+    for column in ws.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+        for cell in column:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = min(max_length + 2, 50)  # Limiter à 50 caractères max
+        ws.column_dimensions[column_letter].width = adjusted_width
+    
+    # Style pour l'en-tête (gras et centré)
+    for cell in ws[1]:
+        cell.font = cell.font.copy(bold=True)
+        cell.alignment = cell.alignment.copy(horizontal='center', vertical='center')
 
 def create_download_button(final_result: pd.DataFrame, filename: str):
     """Crée un bouton de téléchargement avec mise en forme Excel"""
@@ -212,7 +244,7 @@ def create_download_button(final_result: pd.DataFrame, filename: str):
         "Position différente": "BDD7EE"   # Bleu
     }
     
-    add_excel_coloring(wb, colors)
+    apply_excel_styling(wb, colors)
     
     final_file = io.BytesIO()
     wb.save(final_file)
